@@ -1,0 +1,23 @@
+{
+  "name": "word-decompose",
+  "private": true,
+  "packageManager": "pnpm@10.33.3",
+  "scripts": {
+    "dev": "pnpm -r --parallel --filter @word-decompose/web --filter @word-decompose/api run dev",
+    "dev:web": "pnpm --filter @word-decompose/web dev",
+    "dev:api": "pnpm --filter @word-decompose/api dev",
+    "build": "pnpm -r --filter @word-decompose/web --filter @word-decompose/api run build",
+    "build:web": "pnpm --filter @word-decompose/web build",
+    "build:api": "pnpm --filter @word-decompose/api build",
+    "start:api": "pnpm --filter @word-decompose/api start",
+    "typecheck": "pnpm -r --filter @word-decompose/web --filter @word-decompose/api run typecheck"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}
