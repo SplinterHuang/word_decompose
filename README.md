@@ -5,9 +5,13 @@ pnpm monorepo: Vue 3 frontend + Express API, both TypeScript.
 ## Structure
 
 ```text
-apps/web   @word-decompose/web   Vue 3 + Vite + TypeScript
-apps/api   @word-decompose/api   Express + TypeScript
-packages/  reserved for shared packages
+/
+├── package.json
+├── pnpm-workspace.yaml
+├── apps/
+│   ├── web/     @word-decompose/web   Vue 3 + Vite + TypeScript
+│   └── api/     @word-decompose/api   Express + TypeScript
+└── packages/    reserved (empty at init)
 ```
 
 ## Setup
@@ -18,15 +22,20 @@ pnpm install
 
 ## Develop
 
+Default binds:
+
+- web: `http://127.0.0.1:3000` (proxies `/api` → api)
+- api: `http://127.0.0.1:4000`
+
 ```bash
 pnpm dev          # web + api in parallel
-pnpm dev:web      # http://localhost:5173 (proxies /api → :3000)
-pnpm dev:api      # http://localhost:3000
+pnpm dev:web
+pnpm dev:api
 ```
 
 ## Build
 
 ```bash
 pnpm build
-pnpm start:api    # run compiled API
+pnpm start:api
 ```

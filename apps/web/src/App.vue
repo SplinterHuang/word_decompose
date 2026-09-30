@@ -11,7 +11,7 @@ onMounted(async () => {
       ? `API ok (${data.service ?? "unknown"})`
       : "API returned unexpected payload";
   } catch {
-    health.value = "API unreachable — start apps/api with pnpm dev:api";
+    health.value = "API unreachable — start apps/api with pnpm dev:api (127.0.0.1:4000)";
   }
 });
 </script>
