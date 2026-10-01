@@ -10,7 +10,15 @@
     "build:web": "pnpm --filter @word-decompose/web build",
     "build:api": "pnpm --filter @word-decompose/api build",
     "start:api": "pnpm --filter @word-decompose/api start",
-    "typecheck": "pnpm -r --filter @word-decompose/web --filter @word-decompose/api run typecheck"
+    "typecheck": "pnpm -r --filter @word-decompose/web --filter @word-decompose/api run typecheck",
+    "start:test": "./scripts/start.sh test",
+    "stop:test": "./scripts/stop.sh test",
+    "status:test": "./scripts/status.sh test",
+    "restart:test": "./scripts/restart.sh test",
+    "start:dev": "./scripts/start.sh dev",
+    "stop:dev": "./scripts/stop.sh dev",
+    "status:dev": "./scripts/status.sh dev",
+    "restart:dev": "./scripts/restart.sh dev"
   },
   "engines": {
     "node": ">=20"
