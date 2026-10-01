@@ -38,6 +38,8 @@ const loading = ref(false);
 const error = ref<string | null>(null);
 const selectedNode = ref<GraphNode | null>(null);
 const currentGraphData = ref<GraphData>({ nodes: [], edges: [] });
+const neighborhoodMode = ref(false);
+const highlightedNodeId = ref<string | null>(null);
 
 let network: Network | null = null;
 const nodes = new DataSet<{ id: string; label: string; color?: string; shape?: string; title?: string }>();
@@ -50,68 +52,95 @@ function getNodeEdges(nodeId: string): GraphEdge[] {
   );
 }
 
-// Load neighborhood graph for selected node
-async function loadNodeNeighborhood() {
-  if (!selectedNode.value) return;
+// Get 1-hop neighborhood node IDs
+function getNeighborhoodNodeIds(nodeId: string): Set<string> {
+  const neighborhood = new Set<string>();
+  neighborhood.add(nodeId); // Include the node itself
   
-  // Emit to parent or load directly
-  // For MVP, we'll load it by temporarily setting props
-  loading.value = true;
-  try {
-    const url = `/api/graph/node/${encodeURIComponent(selectedNode.value.id)}`;
-    const res = await fetch(url);
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`);
+  // Find all directly connected nodes
+  for (const edge of currentGraphData.value.edges) {
+    if (edge.source === nodeId) {
+      neighborhood.add(edge.target);
+    } else if (edge.target === nodeId) {
+      neighborhood.add(edge.source);
     }
-    const data: GraphData = await res.json();
-    
-    currentGraphData.value = data;
-    nodes.clear();
-    edges.clear();
-    
-    for (const node of data.nodes) {
-      const tooltip = Object.entries(node.properties)
-        .map(([k, v]) => `${k}: ${v}`)
-        .join("\n");
-      
-      const style = getNodeStyle(node);
-      
-      nodes.add({
-        id: node.id,
-        label: node.label,
-        color: style.color,
-        shape: style.shape,
-        title: tooltip,
-      });
-    }
-    
-    for (const edge of data.edges) {
-      // Include role property in label if present
-      let label = edge.type;
-      if (edge.properties?.role) {
-        label = `${edge.type} (${edge.properties.role})`;
-      } else if (edge.properties?.kind) {
-        label = `${edge.type} (${edge.properties.kind})`;
-      }
-      
-      edges.add({
-        id: edge.id,
-        from: edge.source,
-        to: edge.target,
-        label,
-        arrows: "to",
-      });
-    }
-    
-    setTimeout(() => {
-      network?.fit({ animation: true });
-    }, 100);
-    
-  } catch (err) {
-    console.error("[GraphViewer] Error loading neighborhood:", err);
-  } finally {
-    loading.value = false;
   }
+  
+  return neighborhood;
+}
+
+// Highlight neighborhood of selected node
+function highlightNodeNeighborhood() {
+  if (!selectedNode.value || !network) return;
+  
+  const nodeId = selectedNode.value.id;
+  const neighborhood = getNeighborhoodNodeIds(nodeId);
+  
+  // Update nodes: highlight neighborhood, fade others
+  const allNodes = nodes.get();
+  const updatedNodes = allNodes.map(node => {
+    const isInNeighborhood = neighborhood.has(node.id);
+    const graphNode = currentGraphData.value.nodes.find(n => n.id === node.id);
+    const style = graphNode ? getNodeStyle(graphNode) : { color: "#95a5a6" };
+    
+    return {
+      ...node,
+      color: isInNeighborhood ? style.color : "#e0e0e0",
+      shape: style.shape,
+      opacity: isInNeighborhood ? 1 : 0.3,
+    };
+  });
+  nodes.update(updatedNodes);
+  
+  // Update edges: highlight connected to neighborhood nodes, fade others
+  const allEdges = edges.get();
+  const updatedEdges = allEdges.map(edge => {
+    const isConnected = neighborhood.has(edge.from) && neighborhood.has(edge.to);
+    
+    return {
+      ...edge,
+      color: isConnected ? { color: "#4ecdc4" } : { color: "#e0e0e0" },
+      width: isConnected ? 2 : 1,
+      opacity: isConnected ? 1 : 0.2,
+    };
+  });
+  edges.update(updatedEdges);
+  
+  neighborhoodMode.value = true;
+  highlightedNodeId.value = nodeId;
+}
+
+// Cancel neighborhood highlight and restore full graph
+function cancelNeighborhoodHighlight() {
+  if (!network) return;
+  
+  // Restore original node colors and shapes
+  const allNodes = nodes.get();
+  const restoredNodes = allNodes.map(node => {
+    const graphNode = currentGraphData.value.nodes.find(n => n.id === node.id);
+    const style = graphNode ? getNodeStyle(graphNode) : { color: "#95a5a6" };
+    
+    return {
+      ...node,
+      color: style.color,
+      shape: style.shape,
+      opacity: 1,
+    };
+  });
+  nodes.update(restoredNodes);
+  
+  // Restore original edge colors
+  const allEdges = edges.get();
+  const restoredEdges = allEdges.map(edge => ({
+    ...edge,
+    color: { color: "#848484" },
+    width: 2,
+    opacity: 1,
+  }));
+  edges.update(restoredEdges);
+  
+  neighborhoodMode.value = false;
+  highlightedNodeId.value = null;
 }
 
 // Color scheme based on node type
@@ -149,6 +178,8 @@ async function loadGraphData() {
   loading.value = true;
   error.value = null;
   selectedNode.value = null;
+  neighborhoodMode.value = false;
+  highlightedNodeId.value = null;
 
   try {
     let url: string;
@@ -354,8 +385,20 @@ defineExpose({
         </div>
       </div>
       
-      <button @click="loadNodeNeighborhood" class="btn-neighborhood">
+      <button 
+        v-if="!neighborhoodMode || highlightedNodeId !== selectedNode.id"
+        @click="highlightNodeNeighborhood" 
+        class="btn-neighborhood"
+      >
         查看邻域
+      </button>
+      
+      <button 
+        v-if="neighborhoodMode && highlightedNodeId === selectedNode.id"
+        @click="cancelNeighborhoodHighlight" 
+        class="btn-cancel-highlight"
+      >
+        显示全部
       </button>
     </div>
 
@@ -551,6 +594,25 @@ defineExpose({
 
 .btn-neighborhood:hover {
   background: #45b8af;
+}
+
+.btn-cancel-highlight {
+  width: 100%;
+  margin-top: 0.75rem;
+  padding: 0.625rem 1rem;
+  min-height: 44px;
+  background: #7f8c8d;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btn-cancel-highlight:hover {
+  background: #6c7a7b;
 }
 
 .legend {
