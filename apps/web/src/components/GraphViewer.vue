@@ -294,9 +294,15 @@ onMounted(() => {
   }
 });
 
-// Watch for unit changes only (nodeId for future deep-linking)
+// Watch for unit and node changes
 watch(() => props.unitId, (newUnitId, oldUnitId) => {
   if (newUnitId !== oldUnitId) {
+    loadGraphData();
+  }
+});
+
+watch(() => props.nodeId, (newNodeId, oldNodeId) => {
+  if (newNodeId !== oldNodeId) {
     loadGraphData();
   }
 });
