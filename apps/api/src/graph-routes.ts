@@ -121,6 +121,51 @@ router.get("/units", async (_req: Request, res: Response) => {
   }
 });
 
+// List all affixes (roots that are prefix/suffix)
+// Schema contract (verified in production Neo4j):
+// - Root nodes: property `role` = "prefix" | "suffix" for affixes, null/absent for main roots
+// - Root label text: property `form` (not `spell`)
+// - DERIVES_FROM edges: property `role` = "prefix" | "suffix" when present
+router.get("/affixes", async (_req: Request, res: Response) => {
+  if (!requireNeo4j(res)) return;
+
+  const session = getSession();
+  if (!session) {
+    res.status(503).json({ error: "Failed to create session" });
+    return;
+  }
+
+  try {
+    // Query for Root nodes that have role = 'prefix' or 'suffix'
+    const result = await session.run(
+      `MATCH (r:Root)
+       WHERE (r.source = $source OR $source IN labels(r))
+         AND r.role IN ['prefix', 'suffix']
+       RETURN r
+       ORDER BY r.form`,
+      { source: "etymology-roots" }
+    );
+
+    const affixes = result.records.map(record => {
+      const node = toGraphNode(record, "r");
+      
+      return {
+        id: node.properties.id || node.id,
+        form: node.properties.form,
+        role: node.properties.role || "affix",
+        gloss_zh: node.properties.gloss_zh,
+      };
+    });
+
+    res.json({ affixes });
+  } catch (err) {
+    console.error("[graph] Error listing affixes:", err);
+    res.status(500).json({ error: "Failed to list affixes", message: String(err) });
+  } finally {
+    await session.close();
+  }
+});
+
 // Get unit subgraph
 router.get("/unit/:unitId", async (req: Request, res: Response) => {
   if (!requireNeo4j(res)) return;
@@ -207,12 +252,13 @@ router.get("/node/:nodeId", async (req: Request, res: Response) => {
   }
 
   try {
-    // Get node by either elementId or business properties (Unit.id, Root.id, Word.lemma)
+    // Get node by either elementId or business properties (Unit.id, Root.id, Root.form, Word.lemma)
     const result = await session.run(
       `MATCH (n)
        WHERE (n.source = $source OR $source IN labels(n))
          AND (elementId(n) = $nodeId 
            OR n.id = $nodeId 
+           OR n.form = $nodeId
            OR n.lemma = $nodeId)
        OPTIONAL MATCH (n)-[r]-(connected)
        WHERE connected.source = $source OR $source IN labels(connected)
@@ -235,7 +281,7 @@ router.get("/node/:nodeId", async (req: Request, res: Response) => {
         const connected = toGraphNode(record, "connected");
         nodesMap.set(connected.id, connected);
         
-        // Add relationship
+        // Add relationship (now includes role property if present)
         if (record.get("r")) {
           const edge = toGraphEdge(record, "r", "n", "connected");
           edgesMap.set(edge.id, edge);
@@ -275,6 +321,7 @@ router.get("/search", async (req: Request, res: Response) => {
 
   try {
     // Search in form, lemma, gloss_zh, title
+    // Annotate results with isAffix flag for affixes
     const result = await session.run(
       `MATCH (n)
        WHERE (n.source = $source OR $source IN labels(n))
@@ -287,7 +334,19 @@ router.get("/search", async (req: Request, res: Response) => {
       { query: q, source: "etymology-roots" }
     );
 
-    const nodes = result.records.map(record => toGraphNode(record, "n"));
+    const nodes = result.records.map(record => {
+      const node = toGraphNode(record, "n");
+      
+      // Determine if this is an affix root based on role property
+      const isAffix = node.type === "Root" && (
+        node.properties.role === "prefix" || node.properties.role === "suffix"
+      );
+      
+      return {
+        ...node,
+        isAffix,
+      };
+    });
 
     res.json({ nodes });
   } catch (err) {

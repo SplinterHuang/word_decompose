@@ -38,6 +38,18 @@ function handleUnitSelected(unitId: string) {
   sidebarOpen.value = false;
 }
 
+function handleAffixSelected(affixId: string) {
+  selectedUnitId.value = null;
+  selectedNodeId.value = affixId;
+  sidebarOpen.value = false;
+}
+
+function handleNodeSelectedFromSearch(nodeId: string) {
+  selectedUnitId.value = null;
+  selectedNodeId.value = nodeId;
+  sidebarOpen.value = false;
+}
+
 function handleNodeSelected(nodeId: string) {
   console.log("[App] Node selected:", nodeId);
 }
@@ -83,7 +95,11 @@ function closeSidebar() {
       <div v-if="sidebarOpen" class="sidebar-overlay" @click="closeSidebar"></div>
       
       <aside :class="['sidebar', { open: sidebarOpen }]">
-        <UnitSelector @unit-selected="handleUnitSelected" />
+        <UnitSelector 
+          @unit-selected="handleUnitSelected"
+          @affix-selected="handleAffixSelected"
+          @node-selected="handleNodeSelectedFromSearch"
+        />
       </aside>
 
       <main class="main-content">

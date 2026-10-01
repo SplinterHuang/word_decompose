@@ -8,6 +8,7 @@ interface GraphNode {
   label: string;
   type: string;
   properties: Record<string, unknown>;
+  isAffix?: boolean;
 }
 
 interface GraphEdge {
@@ -39,7 +40,7 @@ const selectedNode = ref<GraphNode | null>(null);
 const currentGraphData = ref<GraphData>({ nodes: [], edges: [] });
 
 let network: Network | null = null;
-const nodes = new DataSet<{ id: string; label: string; color?: string; title?: string }>();
+const nodes = new DataSet<{ id: string; label: string; color?: string; shape?: string; title?: string }>();
 const edges = new DataSet<{ id: string; from: string; to: string; label?: string; arrows?: string }>();
 
 // Get edges connected to selected node
@@ -73,16 +74,25 @@ async function loadNodeNeighborhood() {
         .map(([k, v]) => `${k}: ${v}`)
         .join("\n");
       
+      const style = getNodeStyle(node);
+      
       nodes.add({
         id: node.id,
         label: node.label,
-        color: nodeColors[node.type] || "#95a5a6",
+        color: style.color,
+        shape: style.shape,
         title: tooltip,
       });
     }
     
     for (const edge of data.edges) {
-      const label = edge.properties?.kind ? `${edge.type} (${edge.properties.kind})` : edge.type;
+      // Include role property in label if present
+      let label = edge.type;
+      if (edge.properties?.role) {
+        label = `${edge.type} (${edge.properties.role})`;
+      } else if (edge.properties?.kind) {
+        label = `${edge.type} (${edge.properties.kind})`;
+      }
       
       edges.add({
         id: edge.id,
@@ -107,11 +117,27 @@ async function loadNodeNeighborhood() {
 // Color scheme based on node type
 const nodeColors: Record<string, string> = {
   Root: "#ff6b6b",
+  RootAffix: "#ff9f40",  // Orange for affix roots
   Unit: "#4ecdc4",
   Word: "#45b7d1",
   Form: "#96ceb4",
   Insight: "#ffeaa7",
 };
+
+// Helper to determine node color and shape
+function getNodeStyle(node: GraphNode): { color: string; shape?: string } {
+  // Check if this is an affix root (Root with role = prefix or suffix)
+  const isAffix = node.type === "Root" && (
+    node.properties.role === "prefix" || node.properties.role === "suffix" ||
+    node.isAffix
+  );
+  
+  if (isAffix) {
+    return { color: nodeColors.RootAffix, shape: "diamond" };
+  }
+  
+  return { color: nodeColors[node.type] || "#95a5a6" };
+}
 
 // Load graph data
 async function loadGraphData() {
@@ -156,17 +182,26 @@ async function loadGraphData() {
         .map(([k, v]) => `${k}: ${v}`)
         .join("\n");
       
+      const style = getNodeStyle(node);
+      
       nodes.add({
         id: node.id,
         label: node.label,
-        color: nodeColors[node.type] || "#95a5a6",
+        color: style.color,
+        shape: style.shape,
         title: tooltip,
       });
     }
 
     // Add edges
     for (const edge of data.edges) {
-      const label = edge.properties?.kind ? `${edge.type} (${edge.properties.kind})` : edge.type;
+      // Include role property in label if present
+      let label = edge.type;
+      if (edge.properties?.role) {
+        label = `${edge.type} (${edge.properties.role})`;
+      } else if (edge.properties?.kind) {
+        label = `${edge.type} (${edge.properties.kind})`;
+      }
       
       edges.add({
         id: edge.id,
@@ -308,7 +343,8 @@ defineExpose({
         <strong>关系:</strong>
         <div v-for="edge in getNodeEdges(selectedNode.id)" :key="edge.id" class="edge-item">
           {{ edge.type }}
-          <span v-if="edge.properties?.kind" class="edge-kind">({{ edge.properties.kind }})</span>
+          <span v-if="edge.properties?.role" class="edge-kind">({{ edge.properties.role }})</span>
+          <span v-else-if="edge.properties?.kind" class="edge-kind">({{ edge.properties.kind }})</span>
         </div>
       </div>
       
@@ -320,7 +356,15 @@ defineExpose({
     <div class="legend">
       <div class="legend-item">
         <span class="legend-dot" style="background: #ff6b6b"></span>
-        <span class="legend-label">词根 Root</span>
+        <span class="legend-label">主词根 Main Root</span>
+      </div>
+      <div class="legend-item">
+        <span class="legend-diamond" style="background: #ff9f40"></span>
+        <span class="legend-label">前缀 Prefix</span>
+      </div>
+      <div class="legend-item">
+        <span class="legend-diamond" style="background: #ff9f40"></span>
+        <span class="legend-label">后缀 Suffix</span>
       </div>
       <div class="legend-item">
         <span class="legend-dot" style="background: #4ecdc4"></span>
@@ -534,6 +578,14 @@ defineExpose({
   flex-shrink: 0;
 }
 
+.legend-diamond {
+  width: 12px;
+  height: 12px;
+  display: inline-block;
+  flex-shrink: 0;
+  transform: rotate(45deg);
+}
+
 .legend-label {
   white-space: nowrap;
 }
@@ -598,7 +650,8 @@ defineExpose({
     font-size: 0.8rem;
   }
 
-  .legend-dot {
+  .legend-dot,
+  .legend-diamond {
     width: 10px;
     height: 10px;
   }
