@@ -100,7 +100,7 @@ onMounted(() => {
         :class="['unit-item', { active: selectedUnitId === unit.id }]"
         @click="selectUnit(unit.id)"
       >
-        <span class="unit-order">{{ unit.order }}</span>
+        <span class="unit-order">{{ typeof unit.order === 'number' ? unit.order : '?' }}</span>
         <span class="unit-title">{{ unit.title }}</span>
       </button>
     </div>

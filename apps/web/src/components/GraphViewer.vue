@@ -53,17 +53,24 @@ const nodeColors: Record<string, string> = {
 
 // Load graph data
 async function loadGraphData() {
+  // Don't load if no unit or node is selected
+  if (!props.unitId && !props.nodeId) {
+    return;
+  }
+
   loading.value = true;
   error.value = null;
   selectedNode.value = null;
 
   try {
-    let url = "/api/graph/units";
+    let url: string;
     
     if (props.nodeId) {
       url = `/api/graph/node/${encodeURIComponent(props.nodeId)}`;
     } else if (props.unitId) {
       url = `/api/graph/unit/${encodeURIComponent(props.unitId)}`;
+    } else {
+      return; // Should never reach here due to early return above
     }
 
     const res = await fetch(url);
@@ -183,8 +190,10 @@ onMounted(() => {
     selectedNode.value = null;
   });
 
-  // Initial load
-  loadGraphData();
+  // Initial load only if props are set
+  if (props.unitId || props.nodeId) {
+    loadGraphData();
+  }
 });
 
 // Watch for prop changes
@@ -210,7 +219,8 @@ defineExpose({
       <div class="graph-status">
         <span v-if="loading" class="status-loading">加载中...</span>
         <span v-else-if="error" class="status-error">{{ error }}</span>
-        <span v-else class="status-ok">已加载 {{ nodes.length }} 个节点</span>
+        <span v-else-if="nodes.length > 0" class="status-ok">已加载 {{ nodes.length }} 个节点</span>
+        <span v-else class="status-hint">请在左侧选择单元</span>
       </div>
     </div>
 
@@ -291,8 +301,13 @@ defineExpose({
   color: #27ae60;
 }
 
+.status-hint {
+  color: #7f8c8d;
+}
+
 .graph-container {
   flex: 1;
+  min-height: 0;
   background: white;
   position: relative;
 }

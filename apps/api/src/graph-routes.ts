@@ -47,9 +47,23 @@ function toGraphNode(record: Neo4jRecord, key: string): GraphNode {
   const labels = node.labels || [];
   const type = labels[0] || "Unknown";
   
+  // Select label based on node type
+  let label = "?";
+  if (node.properties.spell) {
+    label = node.properties.spell; // Form nodes
+  } else if (node.properties.form) {
+    label = node.properties.form; // Root nodes
+  } else if (node.properties.lemma) {
+    label = node.properties.lemma; // Word nodes
+  } else if (node.properties.title) {
+    label = node.properties.title; // Unit nodes
+  } else if (node.properties.id) {
+    label = node.properties.id; // Fallback to id
+  }
+  
   return {
     id: node.elementId || node.identity?.toString() || "",
-    label: node.properties.form || node.properties.lemma || node.properties.title || node.properties.id || "?",
+    label,
     type: type as GraphNode["type"],
     properties: convertNeo4jIntegers(node.properties || {}) as Record<string, unknown>,
   };
