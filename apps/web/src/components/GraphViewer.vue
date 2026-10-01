@@ -52,7 +52,7 @@ function getNodeEdges(nodeId: string): GraphEdge[] {
   );
 }
 
-// Get 1-hop neighborhood node IDs
+// Get 1-hop neighborhood node IDs from current graph data
 function getNeighborhoodNodeIds(nodeId: string): Set<string> {
   const neighborhood = new Set<string>();
   neighborhood.add(nodeId); // Include the node itself
@@ -69,52 +69,130 @@ function getNeighborhoodNodeIds(nodeId: string): Set<string> {
   return neighborhood;
 }
 
-// Highlight neighborhood of selected node
-function highlightNodeNeighborhood() {
+// Expand graph by fetching and merging node's 1-hop neighborhood
+async function expandNodeNeighborhood() {
   if (!selectedNode.value || !network) return;
   
   const nodeId = selectedNode.value.id;
-  const neighborhood = getNeighborhoodNodeIds(nodeId);
+  loading.value = true;
   
-  // Update nodes: highlight neighborhood, fade others
-  const allNodes = nodes.get();
-  const updatedNodes = allNodes.map(node => {
-    const isInNeighborhood = neighborhood.has(node.id);
-    const graphNode = currentGraphData.value.nodes.find(n => n.id === node.id);
-    const style = graphNode ? getNodeStyle(graphNode) : { color: "#95a5a6" };
+  try {
+    // Fetch neighborhood from API
+    const url = `/api/graph/node/${encodeURIComponent(nodeId)}`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+    const data: GraphData = await res.json();
     
-    return {
-      ...node,
-      color: isInNeighborhood ? style.color : "#e0e0e0",
-      shape: style.shape,
-      opacity: isInNeighborhood ? 1 : 0.3,
-    };
-  });
-  nodes.update(updatedNodes);
-  
-  // Update edges: highlight connected to neighborhood nodes, fade others
-  const allEdges = edges.get();
-  const updatedEdges = allEdges.map(edge => {
-    const isConnected = neighborhood.has(edge.from) && neighborhood.has(edge.to);
+    // Track which nodes/edges are new for optional highlight
+    const newNodeIds = new Set<string>();
+    const newEdgeIds = new Set<string>();
     
-    return {
-      ...edge,
-      color: isConnected ? { color: "#4ecdc4" } : { color: "#e0e0e0" },
-      width: isConnected ? 2 : 1,
-      opacity: isConnected ? 1 : 0.2,
-    };
-  });
-  edges.update(updatedEdges);
-  
-  neighborhoodMode.value = true;
-  highlightedNodeId.value = nodeId;
+    // Merge nodes into graph (dedupe by id)
+    for (const node of data.nodes) {
+      const existingNode = nodes.get(node.id);
+      if (!existingNode) {
+        // New node - add it
+        const tooltip = Object.entries(node.properties)
+          .map(([k, v]) => `${k}: ${v}`)
+          .join("\n");
+        
+        const style = getNodeStyle(node);
+        
+        nodes.add({
+          id: node.id,
+          label: node.label,
+          color: style.color,
+          shape: style.shape,
+          title: tooltip,
+        });
+        
+        // Add to currentGraphData
+        currentGraphData.value.nodes.push(node);
+        newNodeIds.add(node.id);
+      }
+    }
+    
+    // Merge edges into graph (dedupe by id)
+    for (const edge of data.edges) {
+      const existingEdge = edges.get(edge.id);
+      if (!existingEdge) {
+        // New edge - add it
+        let label = edge.type;
+        if (edge.properties?.role) {
+          label = `${edge.type} (${edge.properties.role})`;
+        } else if (edge.properties?.kind) {
+          label = `${edge.type} (${edge.properties.kind})`;
+        }
+        
+        edges.add({
+          id: edge.id,
+          from: edge.source,
+          to: edge.target,
+          label,
+          arrows: "to",
+        });
+        
+        // Add to currentGraphData
+        currentGraphData.value.edges.push(edge);
+        newEdgeIds.add(edge.id);
+      }
+    }
+    
+    // Optional: briefly highlight the newly added neighborhood
+    if (newNodeIds.size > 0 || newEdgeIds.size > 0) {
+      const neighborhood = getNeighborhoodNodeIds(nodeId);
+      
+      // Subtle highlight: brighten the expanded neighborhood
+      const allNodes = nodes.get();
+      const updatedNodes = allNodes.map(node => {
+        const isInNeighborhood = neighborhood.has(node.id);
+        const graphNode = currentGraphData.value.nodes.find(n => n.id === node.id);
+        const style = graphNode ? getNodeStyle(graphNode) : { color: "#95a5a6" };
+        
+        return {
+          ...node,
+          color: style.color,
+          shape: style.shape,
+          // Subtle fade for non-neighborhood nodes
+          opacity: isInNeighborhood ? 1 : 0.6,
+        };
+      });
+      nodes.update(updatedNodes);
+      
+      // Subtle highlight for neighborhood edges
+      const allEdges = edges.get();
+      const updatedEdges = allEdges.map(edge => {
+        const isConnected = neighborhood.has(edge.from) && neighborhood.has(edge.to);
+        
+        return {
+          ...edge,
+          color: isConnected ? { color: "#4ecdc4" } : { color: "#999" },
+          width: isConnected ? 2.5 : 1.5,
+        };
+      });
+      edges.update(updatedEdges);
+      
+      neighborhoodMode.value = true;
+      highlightedNodeId.value = nodeId;
+    }
+    
+    // Don't call fit() - keep user's current view stable
+    
+  } catch (err) {
+    console.error("[GraphViewer] Error expanding neighborhood:", err);
+    error.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    loading.value = false;
+  }
 }
 
-// Cancel neighborhood highlight and restore full graph
+// Cancel neighborhood highlight and restore full graph visibility
 function cancelNeighborhoodHighlight() {
   if (!network) return;
   
-  // Restore original node colors and shapes
+  // Restore all nodes to full visibility
   const allNodes = nodes.get();
   const restoredNodes = allNodes.map(node => {
     const graphNode = currentGraphData.value.nodes.find(n => n.id === node.id);
@@ -386,15 +464,15 @@ defineExpose({
       </div>
       
       <button 
-        v-if="!neighborhoodMode || highlightedNodeId !== selectedNode.id"
-        @click="highlightNodeNeighborhood" 
+        @click="expandNodeNeighborhood" 
+        :disabled="loading"
         class="btn-neighborhood"
       >
-        查看邻域
+        {{ loading ? '加载中...' : '查看邻域' }}
       </button>
       
       <button 
-        v-if="neighborhoodMode && highlightedNodeId === selectedNode.id"
+        v-if="neighborhoodMode"
         @click="cancelNeighborhoodHighlight" 
         class="btn-cancel-highlight"
       >
@@ -592,8 +670,14 @@ defineExpose({
   transition: background 0.2s;
 }
 
-.btn-neighborhood:hover {
+.btn-neighborhood:hover:not(:disabled) {
   background: #45b8af;
+}
+
+.btn-neighborhood:disabled {
+  background: #a8d5d3;
+  cursor: not-allowed;
+  opacity: 0.7;
 }
 
 .btn-cancel-highlight {
