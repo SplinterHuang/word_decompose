@@ -42,6 +42,68 @@ let network: Network | null = null;
 const nodes = new DataSet<{ id: string; label: string; color?: string; title?: string }>();
 const edges = new DataSet<{ id: string; from: string; to: string; label?: string; arrows?: string }>();
 
+// Get edges connected to selected node
+function getNodeEdges(nodeId: string): GraphEdge[] {
+  return currentGraphData.value.edges.filter(
+    e => e.source === nodeId || e.target === nodeId
+  );
+}
+
+// Load neighborhood graph for selected node
+async function loadNodeNeighborhood() {
+  if (!selectedNode.value) return;
+  
+  // Emit to parent or load directly
+  // For MVP, we'll load it by temporarily setting props
+  loading.value = true;
+  try {
+    const url = `/api/graph/node/${encodeURIComponent(selectedNode.value.id)}`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+    const data: GraphData = await res.json();
+    
+    currentGraphData.value = data;
+    nodes.clear();
+    edges.clear();
+    
+    for (const node of data.nodes) {
+      const tooltip = Object.entries(node.properties)
+        .map(([k, v]) => `${k}: ${v}`)
+        .join("\n");
+      
+      nodes.add({
+        id: node.id,
+        label: node.label,
+        color: nodeColors[node.type] || "#95a5a6",
+        title: tooltip,
+      });
+    }
+    
+    for (const edge of data.edges) {
+      const label = edge.properties?.kind ? `${edge.type} (${edge.properties.kind})` : edge.type;
+      
+      edges.add({
+        id: edge.id,
+        from: edge.source,
+        to: edge.target,
+        label,
+        arrows: "to",
+      });
+    }
+    
+    setTimeout(() => {
+      network?.fit({ animation: true });
+    }, 100);
+    
+  } catch (err) {
+    console.error("[GraphViewer] Error loading neighborhood:", err);
+  } finally {
+    loading.value = false;
+  }
+}
+
 // Color scheme based on node type
 const nodeColors: Record<string, string> = {
   Root: "#ff6b6b",
@@ -177,9 +239,10 @@ onMounted(() => {
   network.on("selectNode", (params) => {
     const nodeId = params.nodes[0];
     if (nodeId) {
-      emit("nodeSelected", nodeId);
-      // Show node details
-      const graphNode = currentGraphData.value.nodes.find((n: GraphNode) => n.id === nodeId);
+      const nodeIdStr = String(nodeId);
+      emit("nodeSelected", nodeIdStr);
+      // Show node details from current graph data
+      const graphNode = currentGraphData.value.nodes.find((n: GraphNode) => n.id === nodeIdStr);
       if (graphNode) {
         selectedNode.value = graphNode;
       }
@@ -196,9 +259,11 @@ onMounted(() => {
   }
 });
 
-// Watch for prop changes
-watch([() => props.unitId, () => props.nodeId], () => {
-  loadGraphData();
+// Watch for unit changes only (nodeId for future deep-linking)
+watch(() => props.unitId, (newUnitId, oldUnitId) => {
+  if (newUnitId !== oldUnitId) {
+    loadGraphData();
+  }
 });
 
 // Expose method to load by unit
@@ -229,11 +294,24 @@ defineExpose({
     <div v-if="selectedNode" class="node-details">
       <h4>{{ selectedNode.label }}</h4>
       <div class="node-type">类型: {{ selectedNode.type }}</div>
+      
       <div class="node-props">
         <div v-for="(value, key) in selectedNode.properties" :key="key" class="prop-item">
           <strong>{{ key }}:</strong> {{ value }}
         </div>
       </div>
+      
+      <div v-if="getNodeEdges(selectedNode.id).length > 0" class="node-edges">
+        <strong>关系:</strong>
+        <div v-for="edge in getNodeEdges(selectedNode.id)" :key="edge.id" class="edge-item">
+          {{ edge.type }}
+          <span v-if="edge.properties?.kind" class="edge-kind">({{ edge.properties.kind }})</span>
+        </div>
+      </div>
+      
+      <button @click="loadNodeNeighborhood" class="btn-neighborhood">
+        查看邻域
+      </button>
     </div>
 
     <div class="legend">
@@ -341,6 +419,7 @@ defineExpose({
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  margin-bottom: 0.75rem;
 }
 
 .prop-item {
@@ -350,6 +429,48 @@ defineExpose({
 
 .prop-item strong {
   color: #34495e;
+}
+
+.node-edges {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #eee;
+}
+
+.node-edges strong {
+  display: block;
+  margin-bottom: 0.5rem;
+  color: #34495e;
+  font-size: 0.875rem;
+}
+
+.edge-item {
+  font-size: 0.875rem;
+  color: #555;
+  padding: 0.25rem 0;
+}
+
+.edge-kind {
+  color: #7f8c8d;
+  font-size: 0.8rem;
+}
+
+.btn-neighborhood {
+  width: 100%;
+  margin-top: 0.75rem;
+  padding: 0.5rem 1rem;
+  background: #4ecdc4;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btn-neighborhood:hover {
+  background: #45b8af;
 }
 
 .legend {

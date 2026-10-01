@@ -35,8 +35,12 @@ function handleUnitSelected(unitId: string) {
   selectedNodeId.value = null;
 }
 
+// Node selection is handled internally by GraphViewer
+// This handler is available for future features like deep-linking
 function handleNodeSelected(nodeId: string) {
-  selectedNodeId.value = nodeId;
+  // For MVP: selection shows details without reloading graph
+  // Future: could update URL or enable "view neighborhood" action
+  console.log("[App] Node selected:", nodeId);
 }
 </script>
 
