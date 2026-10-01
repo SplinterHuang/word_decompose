@@ -7,15 +7,27 @@ interface Unit {
   title: string;
 }
 
+interface Affix {
+  id: string;
+  form: string;
+  role: string;
+  gloss_zh?: string;
+}
+
 const emit = defineEmits<{
   unitSelected: [unitId: string];
+  affixSelected: [affixId: string];
+  nodeSelected: [nodeId: string];
 }>();
 
 const units = ref<Unit[]>([]);
+const affixes = ref<Affix[]>([]);
 const selectedUnitId = ref<string | null>(null);
+const selectedAffixId = ref<string | null>(null);
 const loading = ref(false);
 const error = ref<string | null>(null);
 const searchQuery = ref("");
+const browseMode = ref<"units" | "affixes">("units");
 
 async function loadUnits() {
   loading.value = true;
@@ -43,9 +55,62 @@ async function loadUnits() {
   }
 }
 
+async function loadAffixes() {
+  loading.value = true;
+  error.value = null;
+
+  try {
+    const res = await fetch("/api/graph/affixes");
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({ error: "Unknown error" }));
+      throw new Error(errorData.error || `HTTP ${res.status}`);
+    }
+
+    const data = await res.json();
+    affixes.value = data.affixes || [];
+
+    // Auto-select first affix if available
+    if (affixes.value.length > 0 && !selectedAffixId.value) {
+      selectAffix(affixes.value[0].id);
+    }
+  } catch (err) {
+    console.error("[UnitSelector] Error loading affixes:", err);
+    error.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    loading.value = false;
+  }
+}
+
 function selectUnit(unitId: string) {
   selectedUnitId.value = unitId;
+  selectedAffixId.value = null;
   emit("unitSelected", unitId);
+}
+
+function selectAffix(affixId: string) {
+  selectedAffixId.value = affixId;
+  selectedUnitId.value = null;
+  emit("affixSelected", affixId);
+}
+
+function switchMode(mode: "units" | "affixes") {
+  browseMode.value = mode;
+  selectedUnitId.value = null;
+  selectedAffixId.value = null;
+  
+  if (mode === "units") {
+    if (units.value.length === 0) {
+      loadUnits();
+    } else if (units.value.length > 0) {
+      selectUnit(units.value[0].id);
+    }
+  } else {
+    if (affixes.value.length === 0) {
+      loadAffixes();
+    } else if (affixes.value.length > 0) {
+      selectAffix(affixes.value[0].id);
+    }
+  }
 }
 
 async function searchGraph() {
@@ -59,7 +124,20 @@ async function searchGraph() {
 
     const data = await res.json();
     console.log("[UnitSelector] Search results:", data.nodes);
-    // For MVP, just log the results. Could emit them to the graph viewer in the future.
+    
+    // If we get results, allow selecting them
+    if (data.nodes && data.nodes.length > 0) {
+      // For MVP: if first result is an affix Root, emit affixSelected
+      // Otherwise emit nodeSelected to load its neighborhood
+      const firstNode = data.nodes[0];
+      if (firstNode.type === "Root" && firstNode.isAffix) {
+        selectAffix(firstNode.id);
+      } else {
+        selectedUnitId.value = null;
+        selectedAffixId.value = null;
+        emit("nodeSelected", firstNode.id);
+      }
+    }
   } catch (err) {
     console.error("[UnitSelector] Search error:", err);
   }
@@ -73,8 +151,23 @@ onMounted(() => {
 <template>
   <div class="unit-selector">
     <div class="selector-header">
-      <h4>选择单元</h4>
-      <button v-if="error" @click="loadUnits" class="btn-retry">重试</button>
+      <h4>浏览</h4>
+      <button v-if="error" @click="browseMode === 'units' ? loadUnits() : loadAffixes()" class="btn-retry">重试</button>
+    </div>
+
+    <div class="mode-switcher">
+      <button 
+        :class="['mode-btn', { active: browseMode === 'units' }]"
+        @click="switchMode('units')"
+      >
+        单元
+      </button>
+      <button 
+        :class="['mode-btn', { active: browseMode === 'affixes' }]"
+        @click="switchMode('affixes')"
+      >
+        词缀
+      </button>
     </div>
 
     <div class="search-box">
@@ -91,9 +184,10 @@ onMounted(() => {
 
     <div v-if="loading" class="status-message">加载中...</div>
     <div v-else-if="error" class="status-message error">{{ error }}</div>
-    <div v-else-if="units.length === 0" class="status-message">暂无数据</div>
+    <div v-else-if="browseMode === 'units' && units.length === 0" class="status-message">暂无单元</div>
+    <div v-else-if="browseMode === 'affixes' && affixes.length === 0" class="status-message">暂无词缀</div>
 
-    <div v-else class="units-list">
+    <div v-else-if="browseMode === 'units'" class="units-list">
       <button
         v-for="unit in units"
         :key="unit.id"
@@ -102,6 +196,21 @@ onMounted(() => {
       >
         <span class="unit-order">{{ typeof unit.order === 'number' ? unit.order : '?' }}</span>
         <span class="unit-title">{{ unit.title }}</span>
+      </button>
+    </div>
+
+    <div v-else class="affixes-list">
+      <button
+        v-for="affix in affixes"
+        :key="affix.id"
+        :class="['affix-item', { active: selectedAffixId === affix.id }]"
+        @click="selectAffix(affix.id)"
+      >
+        <span :class="['affix-badge', affix.role]">{{ affix.role === 'prefix' ? '前' : '后' }}</span>
+        <div class="affix-info">
+          <span class="affix-form">{{ affix.form }}</span>
+          <span v-if="affix.gloss_zh" class="affix-gloss">{{ affix.gloss_zh }}</span>
+        </div>
       </button>
     </div>
   </div>
@@ -139,6 +248,36 @@ onMounted(() => {
   border-radius: 4px;
   font-size: 0.875rem;
   cursor: pointer;
+}
+
+.mode-switcher {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid #ddd;
+}
+
+.mode-btn {
+  flex: 1;
+  padding: 0.5rem 1rem;
+  background: #f8f9fa;
+  color: #7f8c8d;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.mode-btn:hover {
+  background: #e8f8f5;
+}
+
+.mode-btn.active {
+  background: #4ecdc4;
+  color: white;
+  border-color: #4ecdc4;
 }
 
 .search-box {
@@ -245,6 +384,81 @@ onMounted(() => {
   font-size: 0.95rem;
 }
 
+.affixes-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.5rem;
+}
+
+.affix-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  min-height: 48px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.2s;
+  text-align: left;
+  font-family: inherit;
+}
+
+.affix-item:hover {
+  background: #f8f9fa;
+}
+
+.affix-item.active {
+  background: #fff4e6;
+  border-left: 3px solid #ff9f40;
+}
+
+.affix-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 28px;
+  background: #ff9f40;
+  color: white;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.affix-badge.suffix {
+  background: #ff6b6b;
+}
+
+.affix-item.active .affix-badge {
+  background: #ff8c1a;
+}
+
+.affix-item.active .affix-badge.suffix {
+  background: #e74c3c;
+}
+
+.affix-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.affix-form {
+  color: #2c3e50;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.affix-gloss {
+  color: #7f8c8d;
+  font-size: 0.8rem;
+}
+
 @media (max-width: 768px) {
   .selector-header {
     padding: 1rem;
@@ -260,6 +474,35 @@ onMounted(() => {
 
   .unit-item {
     padding: 0.625rem 0.875rem;
+  }
+
+  .mode-switcher {
+    padding: 0.5rem 0.75rem;
+  }
+
+  .mode-btn {
+    padding: 0.4rem 0.75rem;
+    font-size: 0.8rem;
+  }
+
+  .affix-item {
+    padding: 0.625rem 0.875rem;
+  }
+
+  .unit-order,
+  .affix-badge {
+    min-width: 24px;
+    height: 24px;
+    font-size: 0.75rem;
+  }
+
+  .unit-title,
+  .affix-form {
+    font-size: 0.875rem;
+  }
+
+  .affix-gloss {
+    font-size: 0.75rem;
   }
 }
 
