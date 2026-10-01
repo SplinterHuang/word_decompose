@@ -241,10 +241,6 @@ body {
   overflow: hidden;
 }
 
-.panel.hidden {
-  display: none;
-}
-
 .chat-container {
   max-width: 600px;
   border-right: 1px solid #ddd;
@@ -309,16 +305,10 @@ body {
   }
 
   .sidebar-overlay {
-    display: none;
     position: fixed;
     inset: 0;
     background: rgba(0, 0, 0, 0.4);
     z-index: 999;
-  }
-
-  .sidebar.open ~ .main-content .sidebar-overlay,
-  .sidebar-overlay {
-    display: block;
   }
 
   .split-view {
