@@ -7,6 +7,8 @@ import UnitSelector from "./components/UnitSelector.vue";
 const health = ref<string>("checking…");
 const selectedUnitId = ref<string | null>(null);
 const selectedNodeId = ref<string | null>(null);
+const sidebarOpen = ref(false);
+const activeTab = ref<"chat" | "graph">("graph");
 
 onMounted(async () => {
   try {
@@ -33,36 +35,63 @@ onMounted(async () => {
 function handleUnitSelected(unitId: string) {
   selectedUnitId.value = unitId;
   selectedNodeId.value = null;
+  sidebarOpen.value = false;
 }
 
-// Node selection is handled internally by GraphViewer
-// This handler is available for future features like deep-linking
 function handleNodeSelected(nodeId: string) {
-  // For MVP: selection shows details without reloading graph
-  // Future: could update URL or enable "view neighborhood" action
   console.log("[App] Node selected:", nodeId);
+}
+
+function toggleSidebar() {
+  sidebarOpen.value = !sidebarOpen.value;
+}
+
+function closeSidebar() {
+  sidebarOpen.value = false;
 }
 </script>
 
 <template>
   <div class="app">
     <header class="app-header">
+      <button class="hamburger" @click="toggleSidebar" aria-label="Toggle menu">
+        <span></span>
+        <span></span>
+        <span></span>
+      </button>
       <h1>word-decompose</h1>
       <span class="subtitle">词根词源浏览器</span>
       <div class="health-status">{{ health }}</div>
     </header>
 
+    <div class="mobile-tabs">
+      <button 
+        :class="['tab-btn', { active: activeTab === 'graph' }]"
+        @click="activeTab = 'graph'"
+      >
+        图谱
+      </button>
+      <button 
+        :class="['tab-btn', { active: activeTab === 'chat' }]"
+        @click="activeTab = 'chat'"
+      >
+        对话
+      </button>
+    </div>
+
     <div class="app-body">
-      <aside class="sidebar">
+      <div v-if="sidebarOpen" class="sidebar-overlay" @click="closeSidebar"></div>
+      
+      <aside :class="['sidebar', { open: sidebarOpen }]">
         <UnitSelector @unit-selected="handleUnitSelected" />
       </aside>
 
       <main class="main-content">
         <div class="split-view">
-          <div class="panel chat-container">
+          <div :class="['panel', 'chat-container', { hidden: activeTab !== 'chat' }]">
             <ChatPanel />
           </div>
-          <div class="panel graph-container">
+          <div :class="['panel', 'graph-container', { hidden: activeTab !== 'graph' }]">
             <GraphViewer 
               :unit-id="selectedUnitId || undefined"
               :node-id="selectedNodeId || undefined"
@@ -111,6 +140,27 @@ body {
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
 }
 
+.hamburger {
+  display: none;
+  flex-direction: column;
+  justify-content: space-between;
+  width: 28px;
+  height: 24px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+
+.hamburger span {
+  display: block;
+  width: 100%;
+  height: 3px;
+  background: #2c3e50;
+  border-radius: 2px;
+  transition: all 0.3s;
+}
+
 .app-header h1 {
   margin: 0;
   font-size: 1.5rem;
@@ -133,10 +183,39 @@ body {
   font-weight: 500;
 }
 
+.mobile-tabs {
+  display: none;
+  background: white;
+  border-bottom: 1px solid #ddd;
+}
+
+.tab-btn {
+  flex: 1;
+  padding: 0.875rem;
+  background: transparent;
+  border: none;
+  border-bottom: 3px solid transparent;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #7f8c8d;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.tab-btn.active {
+  color: #4ecdc4;
+  border-bottom-color: #4ecdc4;
+}
+
+.sidebar-overlay {
+  display: none;
+}
+
 .app-body {
   display: flex;
   flex: 1;
   overflow: hidden;
+  position: relative;
 }
 
 .sidebar {
@@ -144,6 +223,7 @@ body {
   background: white;
   border-right: 1px solid #ddd;
   overflow: hidden;
+  transition: transform 0.3s ease;
 }
 
 .main-content {
@@ -159,6 +239,10 @@ body {
 .panel {
   flex: 1;
   overflow: hidden;
+}
+
+.panel.hidden {
+  display: none;
 }
 
 .chat-container {
@@ -189,8 +273,8 @@ body {
 }
 
 @media (max-width: 768px) {
-  .sidebar {
-    width: 220px;
+  .hamburger {
+    display: flex;
   }
 
   .app-header h1 {
@@ -199,6 +283,77 @@ body {
 
   .subtitle {
     display: none;
+  }
+
+  .health-status {
+    display: none;
+  }
+
+  .mobile-tabs {
+    display: flex;
+  }
+
+  .sidebar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 280px;
+    z-index: 1000;
+    transform: translateX(-100%);
+    box-shadow: 2px 0 8px rgba(0, 0, 0, 0.15);
+  }
+
+  .sidebar.open {
+    transform: translateX(0);
+  }
+
+  .sidebar-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    z-index: 999;
+  }
+
+  .sidebar.open ~ .main-content .sidebar-overlay,
+  .sidebar-overlay {
+    display: block;
+  }
+
+  .split-view {
+    flex-direction: column;
+  }
+
+  .panel {
+    max-width: none !important;
+    width: 100%;
+    height: 100%;
+    border: none !important;
+  }
+
+  .panel.hidden {
+    display: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .app-header {
+    padding: 0.75rem 1rem;
+  }
+
+  .app-header h1 {
+    font-size: 1.1rem;
+  }
+
+  .sidebar {
+    width: 85vw;
+    max-width: 300px;
+  }
+
+  .tab-btn {
+    padding: 0.75rem;
+    font-size: 0.95rem;
   }
 }
 </style>

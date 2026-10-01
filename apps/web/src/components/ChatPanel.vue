@@ -164,9 +164,10 @@ function formatTime(date: Date): string {
 .chat-input input {
   flex: 1;
   padding: 0.75rem 1rem;
+  min-height: 44px;
   border: 1px solid #ddd;
   border-radius: 8px;
-  font-size: 0.95rem;
+  font-size: 1rem;
   font-family: inherit;
 }
 
@@ -177,6 +178,7 @@ function formatTime(date: Date): string {
 
 .chat-input button {
   padding: 0.75rem 1.5rem;
+  min-height: 44px;
   background: #4ecdc4;
   color: white;
   border: none;
@@ -194,5 +196,41 @@ function formatTime(date: Date): string {
 .chat-input button:disabled {
   background: #bdc3c7;
   cursor: not-allowed;
+}
+
+@media (max-width: 768px) {
+  .chat-header {
+    padding: 1rem;
+  }
+
+  .chat-header h3 {
+    font-size: 1.1rem;
+  }
+
+  .chat-messages {
+    padding: 0.75rem;
+  }
+
+  .message {
+    max-width: 85%;
+  }
+
+  .chat-input {
+    padding: 0.75rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .chat-header {
+    padding: 0.75rem 1rem;
+  }
+
+  .chat-header h3 {
+    font-size: 1rem;
+  }
+
+  .message {
+    max-width: 90%;
+  }
 }
 </style>

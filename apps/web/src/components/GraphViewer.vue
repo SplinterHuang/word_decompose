@@ -285,13 +285,16 @@ defineExpose({
         <span v-if="loading" class="status-loading">加载中...</span>
         <span v-else-if="error" class="status-error">{{ error }}</span>
         <span v-else-if="nodes.length > 0" class="status-ok">已加载 {{ nodes.length }} 个节点</span>
-        <span v-else class="status-hint">请在左侧选择单元</span>
+        <span v-else class="status-hint">请选择单元</span>
       </div>
     </div>
 
     <div ref="container" class="graph-container"></div>
 
     <div v-if="selectedNode" class="node-details">
+      <div class="node-details-handle"></div>
+      <button class="btn-close" @click="selectedNode = null" aria-label="关闭">×</button>
+      
       <h4>{{ selectedNode.label }}</h4>
       <div class="node-type">类型: {{ selectedNode.type }}</div>
       
@@ -317,23 +320,23 @@ defineExpose({
     <div class="legend">
       <div class="legend-item">
         <span class="legend-dot" style="background: #ff6b6b"></span>
-        词根 Root
+        <span class="legend-label">词根 Root</span>
       </div>
       <div class="legend-item">
         <span class="legend-dot" style="background: #4ecdc4"></span>
-        单元 Unit
+        <span class="legend-label">单元 Unit</span>
       </div>
       <div class="legend-item">
         <span class="legend-dot" style="background: #45b7d1"></span>
-        单词 Word
+        <span class="legend-label">单词 Word</span>
       </div>
       <div class="legend-item">
         <span class="legend-dot" style="background: #96ceb4"></span>
-        形式 Form
+        <span class="legend-label">形式 Form</span>
       </div>
       <div class="legend-item">
         <span class="legend-dot" style="background: #ffeaa7"></span>
-        提示 Insight
+        <span class="legend-label">提示 Insight</span>
       </div>
     </div>
   </div>
@@ -403,10 +406,36 @@ defineExpose({
   z-index: 100;
 }
 
+.node-details-handle {
+  display: none;
+}
+
+.btn-close {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  width: 32px;
+  height: 32px;
+  background: transparent;
+  border: none;
+  font-size: 1.5rem;
+  line-height: 1;
+  color: #7f8c8d;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.2s;
+  display: none;
+}
+
+.btn-close:hover {
+  background: #f0f0f0;
+}
+
 .node-details h4 {
   margin: 0 0 0.5rem 0;
   font-size: 1.1rem;
   color: #2c3e50;
+  padding-right: 2rem;
 }
 
 .node-type {
@@ -458,12 +487,13 @@ defineExpose({
 .btn-neighborhood {
   width: 100%;
   margin-top: 0.75rem;
-  padding: 0.5rem 1rem;
+  padding: 0.625rem 1rem;
+  min-height: 44px;
   background: #4ecdc4;
   color: white;
   border: none;
   border-radius: 6px;
-  font-size: 0.875rem;
+  font-size: 0.95rem;
   font-weight: 600;
   cursor: pointer;
   transition: background 0.2s;
@@ -501,5 +531,107 @@ defineExpose({
   height: 12px;
   border-radius: 50%;
   display: inline-block;
+  flex-shrink: 0;
+}
+
+.legend-label {
+  white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+  .graph-header {
+    padding: 1rem;
+  }
+
+  .graph-header h3 {
+    font-size: 1.1rem;
+  }
+
+  .node-details {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    top: auto;
+    max-width: none;
+    border-radius: 16px 16px 0 0;
+    max-height: 50vh;
+    overflow-y: auto;
+    box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.15);
+    padding: 1.5rem 1rem 1rem;
+    animation: slideUp 0.3s ease-out;
+  }
+
+  @keyframes slideUp {
+    from {
+      transform: translateY(100%);
+    }
+    to {
+      transform: translateY(0);
+    }
+  }
+
+  .node-details-handle {
+    display: block;
+    position: absolute;
+    top: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 40px;
+    height: 4px;
+    background: #ddd;
+    border-radius: 2px;
+  }
+
+  .btn-close {
+    display: block;
+  }
+
+  .legend {
+    bottom: 10px;
+    left: 10px;
+    padding: 0.5rem 0.625rem;
+    gap: 0.375rem;
+  }
+
+  .legend-item {
+    font-size: 0.8rem;
+  }
+
+  .legend-dot {
+    width: 10px;
+    height: 10px;
+  }
+}
+
+@media (max-width: 480px) {
+  .graph-header {
+    padding: 0.75rem 1rem;
+  }
+
+  .graph-header h3 {
+    font-size: 1rem;
+  }
+
+  .graph-status {
+    font-size: 0.8rem;
+  }
+
+  .legend {
+    padding: 0.5rem;
+    gap: 0.25rem;
+  }
+
+  .legend-item {
+    font-size: 0.75rem;
+  }
+
+  .legend-label {
+    display: none;
+  }
+
+  .node-details {
+    padding: 1.25rem 1rem 1rem;
+  }
 }
 </style>
