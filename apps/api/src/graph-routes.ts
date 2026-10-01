@@ -1,6 +1,6 @@
 import { Router, Request, Response } from "express";
 import { getSession, isAvailable, getConnectionError, GraphData, GraphNode, GraphEdge } from "./neo4j.js";
-import { Record as Neo4jRecord } from "neo4j-driver";
+import { Record as Neo4jRecord, Integer, isInt } from "neo4j-driver";
 
 const router = Router();
 
@@ -16,6 +16,31 @@ function requireNeo4j(res: Response): boolean {
   return true;
 }
 
+// Helper to convert Neo4j Integer types to JavaScript numbers
+function convertNeo4jIntegers(obj: unknown): unknown {
+  if (obj === null || obj === undefined) {
+    return obj;
+  }
+  
+  if (isInt(obj)) {
+    return (obj as Integer).toNumber();
+  }
+  
+  if (Array.isArray(obj)) {
+    return obj.map(item => convertNeo4jIntegers(item));
+  }
+  
+  if (typeof obj === "object") {
+    const converted: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(obj)) {
+      converted[key] = convertNeo4jIntegers(value);
+    }
+    return converted;
+  }
+  
+  return obj;
+}
+
 // Helper to convert Neo4j node to GraphNode
 function toGraphNode(record: Neo4jRecord, key: string): GraphNode {
   const node = record.get(key);
@@ -26,7 +51,7 @@ function toGraphNode(record: Neo4jRecord, key: string): GraphNode {
     id: node.elementId || node.identity?.toString() || "",
     label: node.properties.form || node.properties.lemma || node.properties.title || node.properties.id || "?",
     type: type as GraphNode["type"],
-    properties: node.properties || {},
+    properties: convertNeo4jIntegers(node.properties || {}) as Record<string, unknown>,
   };
 }
 
@@ -41,7 +66,7 @@ function toGraphEdge(record: Neo4jRecord, key: string, sourceKey: string, target
     source: source.elementId || source.identity?.toString() || "",
     target: target.elementId || target.identity?.toString() || "",
     type: rel.type || "UNKNOWN",
-    properties: rel.properties || {},
+    properties: convertNeo4jIntegers(rel.properties || {}) as Record<string, unknown>,
   };
 }
 
@@ -168,10 +193,13 @@ router.get("/node/:nodeId", async (req: Request, res: Response) => {
   }
 
   try {
-    // Get node and its immediate neighborhood
+    // Get node by either elementId or business properties (Unit.id, Root.id, Word.lemma)
     const result = await session.run(
       `MATCH (n)
-       WHERE elementId(n) = $nodeId AND (n.source = $source OR $source IN labels(n))
+       WHERE (n.source = $source OR $source IN labels(n))
+         AND (elementId(n) = $nodeId 
+           OR n.id = $nodeId 
+           OR n.lemma = $nodeId)
        OPTIONAL MATCH (n)-[r]-(connected)
        WHERE connected.source = $source OR $source IN labels(connected)
        RETURN n, r, connected`,
