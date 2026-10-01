@@ -151,6 +151,7 @@ onMounted(() => {
 .search-box input {
   flex: 1;
   padding: 0.5rem 0.75rem;
+  min-height: 44px;
   border: 1px solid #ddd;
   border-radius: 6px;
   font-size: 0.875rem;
@@ -164,6 +165,7 @@ onMounted(() => {
 
 .search-box button {
   padding: 0.5rem 1rem;
+  min-height: 44px;
   background: #4ecdc4;
   color: white;
   border: none;
@@ -201,6 +203,7 @@ onMounted(() => {
   align-items: center;
   gap: 0.75rem;
   padding: 0.75rem 1rem;
+  min-height: 48px;
   border: none;
   background: transparent;
   border-radius: 6px;
@@ -240,5 +243,37 @@ onMounted(() => {
   flex: 1;
   color: #2c3e50;
   font-size: 0.95rem;
+}
+
+@media (max-width: 768px) {
+  .selector-header {
+    padding: 1rem;
+  }
+
+  .search-box {
+    padding: 0.75rem;
+  }
+
+  .units-list {
+    padding: 0.25rem;
+  }
+
+  .unit-item {
+    padding: 0.625rem 0.875rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .selector-header {
+    padding: 0.75rem 1rem;
+  }
+
+  .selector-header h4 {
+    font-size: 0.95rem;
+  }
+
+  .search-box {
+    padding: 0.625rem;
+  }
 }
 </style>
