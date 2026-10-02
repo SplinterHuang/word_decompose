@@ -275,7 +275,13 @@ onMounted(() => {
         @click="selectUnit(unit.id)"
       >
         <span class="unit-order">{{ typeof unit.unit_order === 'number' ? unit.unit_order : '?' }}</span>
-        <span class="unit-title">{{ unit.title }}</span>
+        <div class="unit-text">
+          <span class="unit-title">{{ unit.title }}</span>
+          <span
+            v-if="unit.gloss_zh && unit.gloss_zh !== unit.title"
+            class="unit-gloss"
+          >{{ unit.gloss_zh }}</span>
+        </div>
       </button>
     </div>
 
@@ -473,10 +479,24 @@ onMounted(() => {
   background: #45b8af;
 }
 
-.unit-title {
+.unit-text {
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.unit-title {
   color: #2c3e50;
   font-size: 0.95rem;
+  line-height: 1.3;
+}
+
+.unit-gloss {
+  color: #7f8c8d;
+  font-size: 0.8rem;
+  line-height: 1.25;
 }
 
 .affixes-list {

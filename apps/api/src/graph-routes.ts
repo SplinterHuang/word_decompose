@@ -103,12 +103,13 @@ const GRAPH_NEIGHBOR_REL_TYPES = [
   "ILLUSTRATES",
 ] as const;
 
+/** Sidebar label: Root.form is canonical per course unit (see README course-root table). */
 function courseRootTitle(node: GraphNode): string {
-  if (typeof node.properties.gloss_zh === "string" && node.properties.gloss_zh) {
-    return node.properties.gloss_zh;
-  }
   if (typeof node.properties.form === "string" && node.properties.form) {
     return node.properties.form;
+  }
+  if (typeof node.properties.gloss_zh === "string" && node.properties.gloss_zh) {
+    return node.properties.gloss_zh;
   }
   return node.label;
 }
@@ -188,6 +189,7 @@ router.get("/course-roots", async (_req: Request, res: Response) => {
       `MATCH (r:Root)
        WHERE (r.source = $source OR $source IN labels(r))
          AND r.unit_order IS NOT NULL
+         AND r.unit_order >= 1 AND r.unit_order <= 9
          AND (r.role IS NULL OR NOT r.role IN ['prefix', 'suffix'])
        RETURN r
        ORDER BY r.unit_order`,
@@ -331,6 +333,7 @@ router.get("/course-root/:rootId", async (req: Request, res: Response) => {
       `MATCH (r:Root)
        WHERE (r.source = $source OR $source IN labels(r))
          AND r.unit_order IS NOT NULL
+         AND r.unit_order >= 1 AND r.unit_order <= 9
          AND (elementId(r) = $rootId OR r.id = $rootId
            OR ($unitOrder IS NOT NULL AND r.unit_order = $unitOrder))
        OPTIONAL MATCH (r)-[r1]-(n)

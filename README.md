@@ -118,6 +118,20 @@ pnpm start:api    # run compiled API only
 - Click nodes to see details and relationships
 - Interactive physics simulation
 
+**Course roots (Neo4j, read-only):** nine main `:Root` nodes with `unit_order` 1–9 (no `Unit` / `IN_UNIT`). Affix roots have no `unit_order`. Expected `Root.form` per unit:
+
+| `unit_order` | `Root.form` (label in sidebar) |
+|---:|---|
+| 1 | chron-/chrono- |
+| 2 | arch-/archi-/-archy |
+| 3 | struct- |
+| 4 | graph-/gram- |
+| 5 | log- |
+| 6 | path-/pat- |
+| 7 | pel/puls |
+| 8 | pon/pound |
+| 9 | vis/vid |
+
 **API Endpoints:**
 - `GET /api/graph/course-roots` - List main Roots with `unit_order` (sidebar 单元/课)
 - `GET /api/graph/course-root/:rootId` - Subgraph for one course Root (2-hop neighborhood)
@@ -137,8 +151,9 @@ pnpm start:api    # run compiled API only
    - You should see the word-decompose interface with three panels
 
 3. **Test unit (课) selection:**
-   - In the left sidebar, you should see main roots ordered by `unit_order` (if Neo4j is configured and migrated)
+   - In the left sidebar, you should see nine main roots ordered by `unit_order` (forms in table above)
    - Click a row to load that Root’s neighborhood in the graph viewer
+   - Optional API smoke check (read-only): `./scripts/verify-course-roots.sh` with API running
 
 4. **Test Graph Interaction:**
    - The right panel shows the force-directed graph
