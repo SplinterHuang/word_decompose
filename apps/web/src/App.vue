@@ -44,6 +44,12 @@ function handleAffixSelected(affixId: string) {
   sidebarOpen.value = false;
 }
 
+function handleExampleSelected(exampleId: string) {
+  selectedUnitId.value = null;
+  selectedNodeId.value = exampleId;
+  sidebarOpen.value = false;
+}
+
 function handleNodeSelectedFromSearch(nodeId: string) {
   selectedUnitId.value = null;
   selectedNodeId.value = nodeId;
@@ -98,6 +104,7 @@ function closeSidebar() {
         <UnitSelector 
           @unit-selected="handleUnitSelected"
           @affix-selected="handleAffixSelected"
+          @example-selected="handleExampleSelected"
           @node-selected="handleNodeSelectedFromSearch"
         />
       </aside>

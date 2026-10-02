@@ -348,6 +348,7 @@ const nodeColors: Record<string, string> = {
   Word: "#45b7d1",
   Form: "#96ceb4",
   Insight: "#ffeaa7",
+  Example: "#9b59b6",
 };
 
 // Helper to determine node color and shape
