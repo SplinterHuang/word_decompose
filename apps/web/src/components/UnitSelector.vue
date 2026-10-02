@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 
-interface Unit {
+/** Sidebar 「单元」 entry — main Root with unit_order (no Unit nodes in Neo4j). */
+interface CourseRoot {
   id: string;
-  order: number;
+  unit_order: number;
   title: string;
+  form?: string;
+  gloss_zh?: string;
 }
 
 interface Affix {
@@ -28,7 +31,7 @@ const emit = defineEmits<{
   nodeSelected: [nodeId: string];
 }>();
 
-const units = ref<Unit[]>([]);
+const units = ref<CourseRoot[]>([]);
 const affixes = ref<Affix[]>([]);
 const examples = ref<Example[]>([]);
 const selectedUnitId = ref<string | null>(null);
@@ -44,14 +47,14 @@ async function loadUnits() {
   error.value = null;
 
   try {
-    const res = await fetch("/api/graph/units");
+    const res = await fetch("/api/graph/course-roots");
     if (!res.ok) {
       const errorData = await res.json().catch(() => ({ error: "Unknown error" }));
       throw new Error(errorData.error || `HTTP ${res.status}`);
     }
 
     const data = await res.json();
-    units.value = data.units || [];
+    units.value = data.courseRoots || [];
 
     // Auto-select first unit if available
     if (units.value.length > 0 && !selectedUnitId.value) {
@@ -271,7 +274,7 @@ onMounted(() => {
         :class="['unit-item', { active: selectedUnitId === unit.id }]"
         @click="selectUnit(unit.id)"
       >
-        <span class="unit-order">{{ typeof unit.order === 'number' ? unit.order : '?' }}</span>
+        <span class="unit-order">{{ typeof unit.unit_order === 'number' ? unit.unit_order : '?' }}</span>
         <span class="unit-title">{{ unit.title }}</span>
       </button>
     </div>

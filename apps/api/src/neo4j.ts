@@ -50,7 +50,7 @@ export async function closeDriver(): Promise<void> {
 export interface GraphNode {
   id: string;
   label: string;
-  type: "Root" | "Unit" | "Word" | "Form" | "Insight" | "Example";
+  type: "Root" | "Word" | "Form" | "Insight" | "Example";
   properties: Record<string, unknown>;
 }
 
