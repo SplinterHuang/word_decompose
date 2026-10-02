@@ -49,7 +49,17 @@ function toGraphNode(record: Neo4jRecord, key: string): GraphNode {
   
   // Select label based on node type
   let label = "?";
-  if (node.properties.spell) {
+  if (type === "Example") {
+    const title = node.properties.title;
+    const text = node.properties.text;
+    if (typeof title === "string" && title) {
+      label = title;
+    } else if (typeof text === "string" && text) {
+      label = text.length > 48 ? `${text.slice(0, 48)}…` : text;
+    } else if (node.properties.id) {
+      label = String(node.properties.id);
+    }
+  } else if (node.properties.spell) {
     label = node.properties.spell; // Form nodes
   } else if (node.properties.form) {
     label = node.properties.form; // Root nodes
@@ -161,6 +171,51 @@ router.get("/affixes", async (_req: Request, res: Response) => {
   } catch (err) {
     console.error("[graph] Error listing affixes:", err);
     res.status(500).json({ error: "Failed to list affixes", message: String(err) });
+  } finally {
+    await session.close();
+  }
+});
+
+// List Example nodes (dialogue / usage illustrations linked to Words)
+router.get("/examples", async (_req: Request, res: Response) => {
+  if (!requireNeo4j(res)) return;
+
+  const session = getSession();
+  if (!session) {
+    res.status(503).json({ error: "Failed to create session" });
+    return;
+  }
+
+  try {
+    const result = await session.run(
+      `MATCH (e:Example)
+       WHERE e.source = $source OR $source IN labels(e)
+       OPTIONAL MATCH (e)-[:ILLUSTRATES]->(w:Word)
+       WHERE w.source = $source OR $source IN labels(w)
+       WITH e, head(collect(DISTINCT w.lemma)) AS word_lemma
+       RETURN e, word_lemma
+       ORDER BY coalesce(e.kind, ''), coalesce(e.title, e.id)`,
+      { source: "etymology-roots" }
+    );
+
+    const examples = result.records.map(record => {
+      const node = toGraphNode(record, "e");
+      const wordLemma = record.get("word_lemma");
+
+      return {
+        id: node.properties.id || node.id,
+        kind: node.properties.kind || "example",
+        title:
+          (typeof node.properties.title === "string" && node.properties.title) ||
+          node.label,
+        word_lemma: wordLemma ?? undefined,
+      };
+    });
+
+    res.json({ examples });
+  } catch (err) {
+    console.error("[graph] Error listing examples:", err);
+    res.status(500).json({ error: "Failed to list examples", message: String(err) });
   } finally {
     await session.close();
   }
