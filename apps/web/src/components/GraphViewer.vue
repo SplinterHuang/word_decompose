@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { Network } from "vis-network";
 import { DataSet } from "vis-data";
 
@@ -40,6 +40,10 @@ const selectedNode = ref<GraphNode | null>(null);
 const currentGraphData = ref<GraphData>({ nodes: [], edges: [] });
 const neighborhoodMode = ref(false);
 const highlightedNodeId = ref<string | null>(null);
+const hiddenNodeIds = ref<Set<string>>(new Set());
+
+const hiddenNodeCount = computed(() => hiddenNodeIds.value.size);
+const hasHiddenNodes = computed(() => hiddenNodeCount.value > 0);
 
 let network: Network | null = null;
 const nodes = new DataSet<{ id: string; label: string; color?: string; shape?: string; title?: string }>();
@@ -91,6 +95,9 @@ async function expandNodeNeighborhood() {
     
     // Merge nodes into graph (dedupe by id)
     for (const node of data.nodes) {
+      if (hiddenNodeIds.value.has(node.id)) {
+        continue;
+      }
       const existingNode = nodes.get(node.id);
       if (!existingNode) {
         // New node - add it
@@ -116,6 +123,12 @@ async function expandNodeNeighborhood() {
     
     // Merge edges into graph (dedupe by id)
     for (const edge of data.edges) {
+      if (
+        hiddenNodeIds.value.has(edge.source) ||
+        hiddenNodeIds.value.has(edge.target)
+      ) {
+        continue;
+      }
       const existingEdge = edges.get(edge.id);
       if (!existingEdge) {
         // New edge - add it
@@ -188,6 +201,112 @@ async function expandNodeNeighborhood() {
   }
 }
 
+function buildVisNode(node: GraphNode) {
+  const tooltip = Object.entries(node.properties)
+    .map(([k, v]) => `${k}: ${v}`)
+    .join("\n");
+  const style = getNodeStyle(node);
+
+  return {
+    id: node.id,
+    label: node.label,
+    color: style.color,
+    shape: style.shape,
+    title: tooltip,
+  };
+}
+
+function buildVisEdge(edge: GraphEdge) {
+  let label = edge.type;
+  if (edge.properties?.role) {
+    label = `${edge.type} (${edge.properties.role})`;
+  } else if (edge.properties?.kind) {
+    label = `${edge.type} (${edge.properties.kind})`;
+  }
+
+  return {
+    id: edge.id,
+    from: edge.source,
+    to: edge.target,
+    label,
+    arrows: "to" as const,
+  };
+}
+
+function isNodeVisibleOnCanvas(nodeId: string): boolean {
+  return !hiddenNodeIds.value.has(nodeId);
+}
+
+function getEdgeIdsForNode(nodeId: string): string[] {
+  return currentGraphData.value.edges
+    .filter(e => e.source === nodeId || e.target === nodeId)
+    .map(e => e.id);
+}
+
+function clearNodeSelection() {
+  selectedNode.value = null;
+  network?.unselectAll();
+}
+
+// Remove selected node from canvas (client-side only; graph data kept for restore)
+function hideSelectedNode() {
+  if (!selectedNode.value || !network) return;
+
+  const nodeId = selectedNode.value.id;
+  if (hiddenNodeIds.value.has(nodeId)) return;
+
+  const nextHidden = new Set(hiddenNodeIds.value);
+  nextHidden.add(nodeId);
+  hiddenNodeIds.value = nextHidden;
+
+  if (nodes.get(nodeId)) {
+    nodes.remove(nodeId);
+  }
+
+  const edgeIdsToRemove = getEdgeIdsForNode(nodeId).filter(id => edges.get(id));
+  if (edgeIdsToRemove.length > 0) {
+    edges.remove(edgeIdsToRemove);
+  }
+
+  if (highlightedNodeId.value === nodeId) {
+    neighborhoodMode.value = false;
+    highlightedNodeId.value = null;
+  }
+
+  clearNodeSelection();
+}
+
+function restoreHiddenNodes() {
+  if (!network || hiddenNodeIds.value.size === 0) return;
+
+  const toRestore = [...hiddenNodeIds.value];
+  hiddenNodeIds.value = new Set();
+
+  for (const nodeId of toRestore) {
+    const graphNode = currentGraphData.value.nodes.find(n => n.id === nodeId);
+    if (graphNode && !nodes.get(nodeId)) {
+      nodes.add(buildVisNode(graphNode));
+    }
+  }
+
+  const visibleIds = new Set(
+    currentGraphData.value.nodes
+      .filter(n => isNodeVisibleOnCanvas(n.id))
+      .map(n => n.id)
+  );
+
+  for (const edge of currentGraphData.value.edges) {
+    if (!visibleIds.has(edge.source) || !visibleIds.has(edge.target)) continue;
+    if (!edges.get(edge.id)) {
+      edges.add(buildVisEdge(edge));
+    }
+  }
+
+  neighborhoodMode.value = false;
+  highlightedNodeId.value = null;
+  clearNodeSelection();
+}
+
 // Cancel neighborhood highlight and restore full graph visibility
 function cancelNeighborhoodHighlight() {
   if (!network) return;
@@ -258,6 +377,7 @@ async function loadGraphData() {
   selectedNode.value = null;
   neighborhoodMode.value = false;
   highlightedNodeId.value = null;
+  hiddenNodeIds.value = new Set();
 
   try {
     let url: string;
@@ -434,8 +554,19 @@ defineExpose({
       <div class="graph-status">
         <span v-if="loading" class="status-loading">加载中...</span>
         <span v-else-if="error" class="status-error">{{ error }}</span>
-        <span v-else-if="nodes.length > 0" class="status-ok">已加载 {{ nodes.length }} 个节点</span>
+        <span v-else-if="nodes.length > 0" class="status-ok">
+          已加载 {{ nodes.length }} 个节点
+          <span v-if="hasHiddenNodes" class="status-hidden">（已隐藏 {{ hiddenNodeCount }}）</span>
+        </span>
         <span v-else class="status-hint">请选择单元</span>
+        <button
+          v-if="hasHiddenNodes && !loading"
+          type="button"
+          class="btn-restore-hidden"
+          @click="restoreHiddenNodes"
+        >
+          显示已隐藏
+        </button>
       </div>
     </div>
 
@@ -463,17 +594,29 @@ defineExpose({
         </div>
       </div>
       
-      <button 
-        @click="expandNodeNeighborhood" 
-        :disabled="loading"
-        class="btn-neighborhood"
-      >
-        {{ loading ? '加载中...' : '查看邻域' }}
-      </button>
-      
-      <button 
+      <div class="node-actions">
+        <button
+          type="button"
+          @click="expandNodeNeighborhood"
+          :disabled="loading"
+          class="btn-neighborhood"
+        >
+          {{ loading ? '加载中...' : '查看邻域' }}
+        </button>
+        <button
+          type="button"
+          @click="hideSelectedNode"
+          :disabled="loading"
+          class="btn-hide-node"
+        >
+          隐藏节点
+        </button>
+      </div>
+
+      <button
         v-if="neighborhoodMode"
-        @click="cancelNeighborhoodHighlight" 
+        type="button"
+        @click="cancelNeighborhoodHighlight"
         class="btn-cancel-highlight"
       >
         显示全部
@@ -538,7 +681,33 @@ defineExpose({
 }
 
 .graph-status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
   font-size: 0.875rem;
+}
+
+.status-hidden {
+  color: #7f8c8d;
+}
+
+.btn-restore-hidden {
+  padding: 0.375rem 0.75rem;
+  min-height: 36px;
+  background: #7f8c8d;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+  white-space: nowrap;
+}
+
+.btn-restore-hidden:hover {
+  background: #6c7a7b;
 }
 
 .status-loading {
@@ -655,6 +824,19 @@ defineExpose({
   font-size: 0.8rem;
 }
 
+.node-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.node-actions .btn-neighborhood,
+.node-actions .btn-hide-node {
+  flex: 1;
+  min-width: 0;
+  margin-top: 0;
+}
+
 .btn-neighborhood {
   width: 100%;
   margin-top: 0.75rem;
@@ -676,6 +858,30 @@ defineExpose({
 
 .btn-neighborhood:disabled {
   background: #a8d5d3;
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.btn-hide-node {
+  width: 100%;
+  padding: 0.625rem 1rem;
+  min-height: 44px;
+  background: #e67e22;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btn-hide-node:hover:not(:disabled) {
+  background: #d35400;
+}
+
+.btn-hide-node:disabled {
+  background: #e8b88a;
   cursor: not-allowed;
   opacity: 0.7;
 }
