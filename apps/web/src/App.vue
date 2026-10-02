@@ -289,6 +289,11 @@ body {
     display: flex;
   }
 
+  .app-header {
+    position: relative;
+    z-index: 1001;
+  }
+
   .app-header h1 {
     font-size: 1.25rem;
   }
@@ -321,6 +326,7 @@ body {
   }
 
   .sidebar-overlay {
+    display: block;
     position: fixed;
     inset: 0;
     background: rgba(0, 0, 0, 0.4);
