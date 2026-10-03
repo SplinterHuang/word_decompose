@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 
-/** Sidebar 「单元」 entry — main Root with unit_order (no Unit nodes in Neo4j). */
+/** Sidebar 「单元」 entry — non-affix Root (unit_order optional). */
 interface CourseRoot {
   id: string;
-  unit_order: number;
+  unit_order?: number | null;
   title: string;
   form?: string;
   gloss_zh?: string;

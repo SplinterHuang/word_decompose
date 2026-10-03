@@ -174,7 +174,7 @@ function collectTwoHopSubgraph(
   };
 }
 
-// List main course roots (sidebar 「单元」): Root nodes with unit_order, no Unit nodes
+// List browsable roots (sidebar 「单元」): all non-affix Roots; numbered units first
 router.get("/course-roots", async (_req: Request, res: Response) => {
   if (!requireNeo4j(res)) return;
 
@@ -188,11 +188,11 @@ router.get("/course-roots", async (_req: Request, res: Response) => {
     const result = await session.run(
       `MATCH (r:Root)
        WHERE (r.source = $source OR $source IN labels(r))
-         AND r.unit_order IS NOT NULL
-         AND r.unit_order >= 1 AND r.unit_order <= 9
          AND (r.role IS NULL OR NOT r.role IN ['prefix', 'suffix'])
        RETURN r
-       ORDER BY r.unit_order`,
+       ORDER BY CASE WHEN r.unit_order IS NULL THEN 1 ELSE 0 END,
+                r.unit_order,
+                coalesce(r.form, r.id)`,
       { source: "etymology-roots" }
     );
 
@@ -314,7 +314,7 @@ router.get("/examples", async (_req: Request, res: Response) => {
   }
 });
 
-// Course-root subgraph: main Root (unit_order) + 2-hop neighborhood (replaces Unit + IN_UNIT)
+// Root subgraph: 2-hop neighborhood (replaces Unit + IN_UNIT)
 router.get("/course-root/:rootId", async (req: Request, res: Response) => {
   if (!requireNeo4j(res)) return;
 
@@ -332,9 +332,8 @@ router.get("/course-root/:rootId", async (req: Request, res: Response) => {
     const result = await session.run(
       `MATCH (r:Root)
        WHERE (r.source = $source OR $source IN labels(r))
-         AND r.unit_order IS NOT NULL
-         AND r.unit_order >= 1 AND r.unit_order <= 9
-         AND (elementId(r) = $rootId OR r.id = $rootId
+         AND (r.role IS NULL OR NOT r.role IN ['prefix', 'suffix'])
+         AND (elementId(r) = $rootId OR r.id = $rootId OR r.form = $rootId
            OR ($unitOrder IS NOT NULL AND r.unit_order = $unitOrder))
        OPTIONAL MATCH (r)-[r1]-(n)
        WHERE (n.source = $source OR $source IN labels(n))

@@ -118,7 +118,7 @@ pnpm start:api    # run compiled API only
 - Click nodes to see details and relationships
 - Interactive physics simulation
 
-**Course roots (Neo4j, read-only):** nine main `:Root` nodes with `unit_order` 1–9 (no `Unit` / `IN_UNIT`). Affix roots have no `unit_order`. Expected `Root.form` per unit:
+**Course roots (Neo4j, read-only):** sidebar lists all non-affix `:Root` nodes (`source = etymology-roots`). Roots with `unit_order` 1–9 sort first; additional roots (e.g. unnumbered `ject`, `duct`, `spect`) follow, ordered by `form` / `id`. No `Unit` / `IN_UNIT`. Affix roots stay on the 词缀 tab. Numbered `Root.form` values:
 
 | `unit_order` | `Root.form` (label in sidebar) |
 |---:|---|
@@ -133,7 +133,7 @@ pnpm start:api    # run compiled API only
 | 9 | vis/vid |
 
 **API Endpoints:**
-- `GET /api/graph/course-roots` - List main Roots with `unit_order` (sidebar 单元/课)
+- `GET /api/graph/course-roots` - List non-affix Roots (numbered first, then unnumbered; sidebar 单元/课)
 - `GET /api/graph/course-root/:rootId` - Subgraph for one course Root (2-hop neighborhood)
 - `GET /api/graph/units` and `GET /api/graph/unit/:unitId` - **410 Gone** (Unit nodes removed; use course-root endpoints)
 - `GET /api/graph/node/:nodeId` - Get node neighborhood
@@ -151,7 +151,7 @@ pnpm start:api    # run compiled API only
    - You should see the word-decompose interface with three panels
 
 3. **Test unit (课) selection:**
-   - In the left sidebar, you should see nine main roots ordered by `unit_order` (forms in table above)
+   - In the left sidebar, numbered roots 1–9 appear first (forms in table above), then unnumbered roots
    - Click a row to load that Root’s neighborhood in the graph viewer
    - Optional API smoke check (read-only): `./scripts/verify-course-roots.sh` with API running
 
