@@ -47,6 +47,7 @@ async function loadUnits() {
   error.value = null;
 
   try {
+    // Root list only (never /api/graph/units or Unit nodes in Neo4j)
     const res = await fetch("/api/graph/course-roots");
     if (!res.ok) {
       const errorData = await res.json().catch(() => ({ error: "Unknown error" }));

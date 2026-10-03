@@ -174,7 +174,7 @@ function collectTwoHopSubgraph(
   };
 }
 
-// List browsable roots (sidebar 「单元」): all non-affix Roots; numbered units first
+// Sidebar 单元/课: Root-only Cypher (never Unit / IN_UNIT). Non-affix; numbered first.
 router.get("/course-roots", async (_req: Request, res: Response) => {
   if (!requireNeo4j(res)) return;
 
@@ -314,7 +314,7 @@ router.get("/examples", async (_req: Request, res: Response) => {
   }
 });
 
-// Root subgraph: 2-hop neighborhood (replaces Unit + IN_UNIT)
+// Sidebar graph load: Root center + 2-hop neighborhood (Root-only; no Unit / IN_UNIT)
 router.get("/course-root/:rootId", async (req: Request, res: Response) => {
   if (!requireNeo4j(res)) return;
 

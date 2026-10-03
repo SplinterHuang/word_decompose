@@ -118,7 +118,7 @@ pnpm start:api    # run compiled API only
 - Click nodes to see details and relationships
 - Interactive physics simulation
 
-**Course roots (Neo4j, read-only):** sidebar lists all non-affix `:Root` nodes (`source = etymology-roots`). Roots with `unit_order` 1–9 sort first; additional roots (e.g. unnumbered `ject`, `duct`, `spect`) follow, ordered by `form` / `id`. No `Unit` / `IN_UNIT`. Affix roots stay on the 词缀 tab. Numbered `Root.form` values:
+**Course roots (Neo4j, read-only):** sidebar **单元/课** lists `:Root` nodes only (`source = etymology-roots`; no `Unit` / `IN_UNIT` Cypher). Non-affix roots: `unit_order` 1–9 first, then roots with null `unit_order`, ordered by `form` / `id`. Affix roots use the 词缀 tab. Numbered `Root.form` values:
 
 | `unit_order` | `Root.form` (label in sidebar) |
 |---:|---|
