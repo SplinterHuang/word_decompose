@@ -56,11 +56,6 @@ async function loadUnits() {
 
     const data = await res.json();
     units.value = data.courseRoots || [];
-
-    // Auto-select first unit if available
-    if (units.value.length > 0 && !selectedUnitId.value) {
-      selectUnit(units.value[0].id);
-    }
   } catch (err) {
     console.error("[UnitSelector] Error loading units:", err);
     error.value = err instanceof Error ? err.message : String(err);
@@ -82,11 +77,6 @@ async function loadAffixes() {
 
     const data = await res.json();
     affixes.value = data.affixes || [];
-
-    // Auto-select first affix if available
-    if (affixes.value.length > 0 && !selectedAffixId.value) {
-      selectAffix(affixes.value[0].id);
-    }
   } catch (err) {
     console.error("[UnitSelector] Error loading affixes:", err);
     error.value = err instanceof Error ? err.message : String(err);
@@ -108,10 +98,6 @@ async function loadExamples() {
 
     const data = await res.json();
     examples.value = data.examples || [];
-
-    if (examples.value.length > 0 && !selectedExampleId.value) {
-      selectExample(examples.value[0].id);
-    }
   } catch (err) {
     console.error("[UnitSelector] Error loading examples:", err);
     error.value = err instanceof Error ? err.message : String(err);
@@ -158,25 +144,16 @@ function reloadCurrentMode() {
 }
 
 function switchMode(mode: "units" | "affixes" | "examples") {
+  if (browseMode.value === mode) return;
   browseMode.value = mode;
-  clearSelection();
-  
-  if (mode === "units") {
-    if (units.value.length === 0) {
-      loadUnits();
-    } else if (units.value.length > 0) {
-      selectUnit(units.value[0].id);
-    }
-  } else if (mode === "affixes") {
-    if (affixes.value.length === 0) {
-      loadAffixes();
-    } else if (affixes.value.length > 0) {
-      selectAffix(affixes.value[0].id);
-    }
-  } else if (examples.value.length === 0) {
+
+  // Lazy-load list only; do not emit selection (keeps mobile drawer open).
+  if (mode === "units" && units.value.length === 0) {
+    loadUnits();
+  } else if (mode === "affixes" && affixes.value.length === 0) {
+    loadAffixes();
+  } else if (mode === "examples" && examples.value.length === 0) {
     loadExamples();
-  } else if (examples.value.length > 0) {
-    selectExample(examples.value[0].id);
   }
 }
 
@@ -217,8 +194,11 @@ function exampleKindLabel(kind: string): string {
   return "例";
 }
 
-onMounted(() => {
-  loadUnits();
+onMounted(async () => {
+  await loadUnits();
+  if (units.value.length > 0) {
+    selectUnit(units.value[0].id);
+  }
 });
 </script>
 
