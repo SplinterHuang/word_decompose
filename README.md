@@ -49,15 +49,17 @@ NEO4J_DATABASE=neo4j
 
 Public hosts (tunnel owned by another team; **not** configured in this repo):
 
-- `https://word-decom-test.vm.splinter.fun` → host `:3000`
-- `https://word-decom-dev.vm.splinter.fun` → host `:3000`
-- Leave `vm.splinter.fun` → `:8080` untouched
+- `https://word-decom-test.splinter.fun` → host `:3000`
+- `https://word-decom-dev.splinter.fun` → host `:3000`
+- Legacy `*.vm.splinter.fun` hostnames may still forward to `:3000`
 
-Vite `allowedHosts` includes `*.vm.splinter.fun` so those hostnames work once the tunnel exists.
+Vite `server` / `preview` `allowedHosts` includes `.splinter.fun` and `.vm.splinter.fun`.
 
 ## Deploy host: start / stop / status
 
 Native processes (no Docker). Pid + logs under `logs/<env>/`.
+
+`start.sh` / `restart.sh` build if `apps/web/dist` or `apps/api/dist` is missing (or when `BUILD=1`), then serve **production** artifacts: `node apps/api/dist` + `vite preview` on `:3000` (with `/api` proxy). This is not `vite` dev or `tsx watch`. Local hot-reload: `pnpm dev` / `pnpm dev:web` / `pnpm dev:api`.
 
 ```bash
 ./scripts/start.sh test    # or: ./scripts/start.sh dev
