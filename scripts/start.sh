@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Start web (:3000) + api (:4000) in background for APP_ENV=dev|test
+# Start web (:3000) + api (:4000) from production build (vite preview + node dist).
+# Not vite dev / tsx watch — intended for public soft preview and deploy scripts.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -8,8 +9,9 @@ source "${SCRIPT_DIR}/common.sh"
 resolve_env "${1:-}"
 load_dotenv
 ensure_pnpm
+ensure_prod_build
 
-echo "starting word_decompose (${APP_ENV})"
+echo "starting word_decompose (${APP_ENV}) [production serve]"
 echo "  api: http://${API_HOST}:${API_PORT}"
 echo "  web: http://${WEB_HOST}:${WEB_PORT}"
 
@@ -37,19 +39,20 @@ rm -f "$API_PID_FILE" "$WEB_PID_FILE"
 
 export HOST="$API_HOST"
 export PORT="$API_PORT"
-export API_HOST API_PORT WEB_HOST WEB_PORT NODE_ENV APP_ENV
+export API_HOST API_PORT WEB_HOST WEB_PORT APP_ENV
+export NODE_ENV="${NODE_ENV:-production}"
 
 # setsid: new session so stop can tear down the process tree reliably
 (
   cd "$ROOT_DIR"
-  setsid pnpm --filter @word-decompose/api exec tsx watch src/index.ts \
+  setsid pnpm --filter @word-decompose/api start \
     >>"$API_LOG_FILE" 2>&1 &
   echo $! >"$API_PID_FILE"
 )
 
 (
   cd "$ROOT_DIR"
-  setsid pnpm --filter @word-decompose/web exec vite \
+  setsid pnpm --filter @word-decompose/web exec vite preview \
     --host "$WEB_HOST" \
     --port "$WEB_PORT" \
     --strictPort \
