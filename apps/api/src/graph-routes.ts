@@ -1,8 +1,12 @@
 import { Router, Request, Response } from "express";
 import { getSession, isAvailable, getConnectionError, GraphData, GraphNode, GraphEdge } from "./neo4j.js";
 import { Record as Neo4jRecord, Integer, isInt } from "neo4j-driver";
+import { requireGraphWritePassword } from "./write-auth.js";
 
 const router = Router();
+
+const SOURCE = "etymology-roots";
+const MAX_UNFAMILIAR_NOTE_LENGTH = 200;
 
 // Helper to handle unavailable Neo4j
 function requireNeo4j(res: Response): boolean {
@@ -66,7 +70,7 @@ function toGraphNode(record: Neo4jRecord, key: string): GraphNode {
   } else if (node.properties.lemma) {
     label = node.properties.lemma; // Word nodes
   } else if (node.properties.title) {
-    label = node.properties.title; // Unit nodes
+    label = node.properties.title;
   } else if (node.properties.id) {
     label = node.properties.id; // Fallback to id
   }
@@ -94,8 +98,88 @@ function toGraphEdge(record: Neo4jRecord, key: string, sourceKey: string, target
   };
 }
 
-// List all units
-router.get("/units", async (_req: Request, res: Response) => {
+const GRAPH_NEIGHBOR_REL_TYPES = [
+  "DERIVES_FROM",
+  "SYNONYM_OF",
+  "CONFUSABLE_WITH",
+  "MISSPELLING_OF",
+  "ABOUT",
+  "ILLUSTRATES",
+] as const;
+
+/** Sidebar label: Root.form is canonical per course unit (see README course-root table). */
+function courseRootTitle(node: GraphNode): string {
+  if (typeof node.properties.form === "string" && node.properties.form) {
+    return node.properties.form;
+  }
+  if (typeof node.properties.gloss_zh === "string" && node.properties.gloss_zh) {
+    return node.properties.gloss_zh;
+  }
+  return node.label;
+}
+
+function collectTwoHopSubgraph(
+  records: Neo4jRecord[],
+  opts: {
+    centerKey: string;
+    hop1NodeKey: string;
+    hop1RelKey: string;
+    hop1SourceKey: string;
+    hop1TargetKey: string;
+    hop2NodeKey: string;
+    hop2RelKey: string;
+    hop2SourceKey: string;
+    hop2TargetKey: string;
+  }
+): GraphData {
+  const nodesMap = new Map<string, GraphNode>();
+  const edgesMap = new Map<string, GraphEdge>();
+
+  for (const record of records) {
+    if (record.get(opts.centerKey)) {
+      const center = toGraphNode(record, opts.centerKey);
+      nodesMap.set(center.id, center);
+    }
+
+    if (record.get(opts.hop1NodeKey)) {
+      const hop1 = toGraphNode(record, opts.hop1NodeKey);
+      nodesMap.set(hop1.id, hop1);
+
+      if (record.get(opts.hop1RelKey)) {
+        const edge = toGraphEdge(
+          record,
+          opts.hop1RelKey,
+          opts.hop1SourceKey,
+          opts.hop1TargetKey
+        );
+        edgesMap.set(edge.id, edge);
+      }
+    }
+
+    if (record.get(opts.hop2NodeKey)) {
+      const hop2 = toGraphNode(record, opts.hop2NodeKey);
+      nodesMap.set(hop2.id, hop2);
+
+      if (record.get(opts.hop2RelKey)) {
+        const edge = toGraphEdge(
+          record,
+          opts.hop2RelKey,
+          opts.hop2SourceKey,
+          opts.hop2TargetKey
+        );
+        edgesMap.set(edge.id, edge);
+      }
+    }
+  }
+
+  return {
+    nodes: Array.from(nodesMap.values()),
+    edges: Array.from(edgesMap.values()),
+  };
+}
+
+// Sidebar 单元/课: Root-only Cypher (never Unit / IN_UNIT). Non-affix; numbered first.
+router.get("/course-roots", async (_req: Request, res: Response) => {
   if (!requireNeo4j(res)) return;
 
   const session = getSession();
@@ -106,29 +190,42 @@ router.get("/units", async (_req: Request, res: Response) => {
 
   try {
     const result = await session.run(
-      `MATCH (u:Unit)
-       WHERE u.source = $source OR $source IN labels(u)
-       RETURN u
-       ORDER BY u.order`,
-      { source: "etymology-roots" }
+      `MATCH (r:Root)
+       WHERE (r.source = $source OR $source IN labels(r))
+         AND (r.role IS NULL OR NOT r.role IN ['prefix', 'suffix'])
+       RETURN r
+       ORDER BY CASE WHEN r.unit_order IS NULL THEN 1 ELSE 0 END,
+                r.unit_order,
+                coalesce(r.form, r.id)`,
+      { source: SOURCE }
     );
 
-    const units = result.records.map(record => {
-      const node = toGraphNode(record, "u");
+    const courseRoots = result.records.map(record => {
+      const node = toGraphNode(record, "r");
       return {
         id: node.properties.id || node.id,
-        order: node.properties.order,
-        title: node.properties.title,
+        unit_order: node.properties.unit_order,
+        form: node.properties.form,
+        gloss_zh: node.properties.gloss_zh,
+        title: courseRootTitle(node),
       };
     });
 
-    res.json({ units });
+    res.json({ courseRoots });
   } catch (err) {
-    console.error("[graph] Error listing units:", err);
-    res.status(500).json({ error: "Failed to list units", message: String(err) });
+    console.error("[graph] Error listing course roots:", err);
+    res.status(500).json({ error: "Failed to list course roots", message: String(err) });
   } finally {
     await session.close();
   }
+});
+
+/** @deprecated Use GET /course-roots — Unit nodes removed from Neo4j */
+router.get("/units", (_req: Request, res: Response) => {
+  res.status(410).json({
+    error: "Gone",
+    message: "Unit nodes were removed from the graph. Use GET /api/graph/course-roots instead.",
+  });
 });
 
 // List all affixes (roots that are prefix/suffix)
@@ -221,78 +318,70 @@ router.get("/examples", async (_req: Request, res: Response) => {
   }
 });
 
-// Get unit subgraph
-router.get("/unit/:unitId", async (req: Request, res: Response) => {
+// Sidebar graph load: Root center + 2-hop neighborhood (Root-only; no Unit / IN_UNIT)
+router.get("/course-root/:rootId", async (req: Request, res: Response) => {
   if (!requireNeo4j(res)) return;
 
-  const { unitId } = req.params;
+  const { rootId } = req.params;
+  const unitOrderParam = /^\d+$/.test(rootId) ? parseInt(rootId, 10) : null;
   const session = getSession();
   if (!session) {
     res.status(503).json({ error: "Failed to create session" });
     return;
   }
 
+  const relTypes = [...GRAPH_NEIGHBOR_REL_TYPES];
+
   try {
-    // Get unit and all connected roots and words
     const result = await session.run(
-      `MATCH (u:Unit {id: $unitId})
-       WHERE u.source = $source OR $source IN labels(u)
-       OPTIONAL MATCH (u)<-[r1:IN_UNIT]-(n)
-       WHERE n.source = $source OR $source IN labels(n)
+      `MATCH (r:Root)
+       WHERE (r.source = $source OR $source IN labels(r))
+         AND (r.role IS NULL OR NOT r.role IN ['prefix', 'suffix'])
+         AND (elementId(r) = $rootId OR r.id = $rootId OR r.form = $rootId
+           OR ($unitOrder IS NOT NULL AND r.unit_order = $unitOrder))
+       OPTIONAL MATCH (r)-[r1]-(n)
+       WHERE (n.source = $source OR $source IN labels(n))
+         AND type(r1) IN $relTypes
        OPTIONAL MATCH (n)-[r2]-(connected)
        WHERE (connected.source = $source OR $source IN labels(connected))
-         AND type(r2) IN ['DERIVES_FROM', 'SYNONYM_OF', 'CONFUSABLE_WITH', 'MISSPELLING_OF', 'ABOUT']
-       RETURN u, r1, n, r2, connected`,
-      { unitId, source: "etymology-roots" }
+         AND type(r2) IN $relTypes
+       RETURN r, r1, n, r2, connected`,
+      { rootId, unitOrder: unitOrderParam, source: "etymology-roots", relTypes }
     );
 
-    const nodesMap = new Map<string, GraphNode>();
-    const edgesMap = new Map<string, GraphEdge>();
-
-    for (const record of result.records) {
-      // Add unit
-      if (record.get("u")) {
-        const unit = toGraphNode(record, "u");
-        nodesMap.set(unit.id, unit);
-      }
-
-      // Add main node (root/word)
-      if (record.get("n")) {
-        const node = toGraphNode(record, "n");
-        nodesMap.set(node.id, node);
-        
-        // Add IN_UNIT relationship
-        if (record.get("r1")) {
-          const edge = toGraphEdge(record, "r1", "n", "u");
-          edgesMap.set(edge.id, edge);
-        }
-      }
-
-      // Add connected node
-      if (record.get("connected")) {
-        const connected = toGraphNode(record, "connected");
-        nodesMap.set(connected.id, connected);
-        
-        // Add relationship
-        if (record.get("r2")) {
-          const edge = toGraphEdge(record, "r2", "n", "connected");
-          edgesMap.set(edge.id, edge);
-        }
-      }
+    if (result.records.length === 0) {
+      res.status(404).json({ error: "Course root not found", rootId });
+      return;
     }
 
-    const graphData: GraphData = {
-      nodes: Array.from(nodesMap.values()),
-      edges: Array.from(edgesMap.values()),
-    };
+    const graphData = collectTwoHopSubgraph(result.records, {
+      centerKey: "r",
+      hop1NodeKey: "n",
+      hop1RelKey: "r1",
+      hop1SourceKey: "r",
+      hop1TargetKey: "n",
+      hop2NodeKey: "connected",
+      hop2RelKey: "r2",
+      hop2SourceKey: "n",
+      hop2TargetKey: "connected",
+    });
 
     res.json(graphData);
   } catch (err) {
-    console.error("[graph] Error getting unit subgraph:", err);
-    res.status(500).json({ error: "Failed to get unit subgraph", message: String(err) });
+    console.error("[graph] Error getting course-root subgraph:", err);
+    res.status(500).json({ error: "Failed to get course-root subgraph", message: String(err) });
   } finally {
     await session.close();
   }
+});
+
+/** @deprecated Use GET /course-root/:rootId — Unit nodes and IN_UNIT removed from Neo4j */
+router.get("/unit/:unitId", (req: Request, res: Response) => {
+  res.status(410).json({
+    error: "Gone",
+    message: "Unit subgraph was removed. Use GET /api/graph/course-root/:rootId instead.",
+    unitId: req.params.unitId,
+  });
 });
 
 // Get neighborhood of a root or word
@@ -307,7 +396,7 @@ router.get("/node/:nodeId", async (req: Request, res: Response) => {
   }
 
   try {
-    // Get node by either elementId or business properties (Unit.id, Root.id, Root.form, Word.lemma)
+    // Get node by elementId or business properties (Root.id, Root.form, Word.lemma, Example.id)
     const result = await session.run(
       `MATCH (n)
        WHERE (n.source = $source OR $source IN labels(n))
@@ -411,5 +500,152 @@ router.get("/search", async (req: Request, res: Response) => {
     await session.close();
   }
 });
+
+// List Word nodes marked unfamiliar (read-only)
+router.get("/unfamiliar-words", async (_req: Request, res: Response) => {
+  if (!requireNeo4j(res)) return;
+
+  const session = getSession();
+  if (!session) {
+    res.status(503).json({ error: "Failed to create session" });
+    return;
+  }
+
+  try {
+    const result = await session.run(
+      `MATCH (w:Word)
+       WHERE (w.source = $source OR $source IN labels(w))
+         AND w.unfamiliar = true
+       RETURN w
+       ORDER BY w.lemma`,
+      { source: SOURCE }
+    );
+
+    const words = result.records.map(record => {
+      const node = toGraphNode(record, "w");
+      return {
+        lemma: node.properties.lemma,
+        unfamiliar_note:
+          typeof node.properties.unfamiliar_note === "string"
+            ? node.properties.unfamiliar_note
+            : undefined,
+        id: node.id,
+      };
+    });
+
+    res.json({ words });
+  } catch (err) {
+    console.error("[graph] Error listing unfamiliar words:", err);
+    res.status(500).json({ error: "Failed to list unfamiliar words", message: String(err) });
+  } finally {
+    await session.close();
+  }
+});
+
+// Mark or unmark a Word as unfamiliar (Word nodes only; narrow write path)
+router.patch(
+  "/word/:lemma/unfamiliar",
+  requireGraphWritePassword,
+  async (req: Request, res: Response) => {
+    if (!requireNeo4j(res)) return;
+
+    const { lemma } = req.params;
+    if (!lemma || typeof lemma !== "string") {
+      res.status(400).json({ error: "lemma required" });
+      return;
+    }
+
+    const body = req.body as { unfamiliar?: unknown; unfamiliar_note?: unknown };
+    if (typeof body.unfamiliar !== "boolean") {
+      res.status(400).json({ error: "Body field 'unfamiliar' (boolean) is required" });
+      return;
+    }
+
+    let note: string | null = null;
+    if (body.unfamiliar) {
+      if (body.unfamiliar_note !== undefined && body.unfamiliar_note !== null) {
+        if (typeof body.unfamiliar_note !== "string") {
+          res.status(400).json({ error: "unfamiliar_note must be a string" });
+          return;
+        }
+        const trimmed = body.unfamiliar_note.trim();
+        if (trimmed.length > MAX_UNFAMILIAR_NOTE_LENGTH) {
+          res.status(400).json({
+            error: `unfamiliar_note must be at most ${MAX_UNFAMILIAR_NOTE_LENGTH} characters`,
+          });
+          return;
+        }
+        note = trimmed.length > 0 ? trimmed : null;
+      }
+    }
+
+    const session = getSession();
+    if (!session) {
+      res.status(503).json({ error: "Failed to create session" });
+      return;
+    }
+
+    try {
+      if (body.unfamiliar) {
+        const result = await session.run(
+          `MATCH (w:Word {lemma: $lemma})
+           WHERE (w.source = $source OR $source IN labels(w))
+           SET w.unfamiliar = true
+           FOREACH (_ IN CASE WHEN $note IS NULL THEN [] ELSE [1] END |
+             SET w.unfamiliar_note = $note)
+           RETURN w`,
+          { lemma, source: SOURCE, note }
+        );
+
+        if (result.records.length === 0) {
+          res.status(404).json({ error: "Word not found", lemma });
+          return;
+        }
+
+        const node = toGraphNode(result.records[0], "w");
+        res.json({
+          ok: true,
+          word: {
+            lemma: node.properties.lemma,
+            unfamiliar: true,
+            unfamiliar_note:
+              typeof node.properties.unfamiliar_note === "string"
+                ? node.properties.unfamiliar_note
+                : undefined,
+            id: node.id,
+          },
+        });
+      } else {
+        const result = await session.run(
+          `MATCH (w:Word {lemma: $lemma})
+           WHERE (w.source = $source OR $source IN labels(w))
+           REMOVE w.unfamiliar, w.unfamiliar_note
+           RETURN w`,
+          { lemma, source: SOURCE }
+        );
+
+        if (result.records.length === 0) {
+          res.status(404).json({ error: "Word not found", lemma });
+          return;
+        }
+
+        const node = toGraphNode(result.records[0], "w");
+        res.json({
+          ok: true,
+          word: {
+            lemma: node.properties.lemma,
+            unfamiliar: false,
+            id: node.id,
+          },
+        });
+      }
+    } catch (err) {
+      console.error("[graph] Error updating unfamiliar flag:", err);
+      res.status(500).json({ error: "Failed to update word", message: String(err) });
+    } finally {
+      await session.close();
+    }
+  }
+);
 
 export default router;

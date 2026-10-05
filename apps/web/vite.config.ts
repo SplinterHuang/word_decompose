@@ -15,7 +15,7 @@ export default defineConfig(({ mode }) => {
       port: webPort,
       strictPort: true,
       // Allow Cloudflare tunnel hostnames when they forward to :3000
-      allowedHosts: [".vm.splinter.fun", ".trycloudflare.com", "localhost", "127.0.0.1"],
+      allowedHosts: [".splinter.fun", ".vm.splinter.fun", ".trycloudflare.com", "localhost", "127.0.0.1"],
       proxy: {
         "/api": {
           target: `http://${apiHost}:${apiPort}`,
@@ -27,7 +27,13 @@ export default defineConfig(({ mode }) => {
       host: webHost,
       port: webPort,
       strictPort: true,
-      allowedHosts: [".vm.splinter.fun", ".trycloudflare.com", "localhost", "127.0.0.1"],
+      allowedHosts: [".splinter.fun", ".vm.splinter.fun", ".trycloudflare.com", "localhost", "127.0.0.1"],
+      proxy: {
+        "/api": {
+          target: `http://${apiHost}:${apiPort}`,
+          changeOrigin: true,
+        },
+      },
     },
   };
 });

@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { Network } from "vis-network";
 import { DataSet } from "vis-data";
+import { patchWordUnfamiliar } from "../lib/graphWrite";
 
 interface GraphNode {
   id: string;
@@ -25,6 +26,7 @@ interface GraphData {
 }
 
 const props = defineProps<{
+  /** Main Root id (course / 单元) with unit_order */
   unitId?: string;
   nodeId?: string;
 }>();
@@ -41,13 +43,47 @@ const currentGraphData = ref<GraphData>({ nodes: [], edges: [] });
 const neighborhoodMode = ref(false);
 const highlightedNodeId = ref<string | null>(null);
 const hiddenNodeIds = ref<Set<string>>(new Set());
+const showUnfamiliarOnly = ref(false);
+const unfamiliarWriteLoading = ref(false);
+const unfamiliarWriteError = ref<string | null>(null);
+const unfamiliarNoteDraft = ref("");
 
 const hiddenNodeCount = computed(() => hiddenNodeIds.value.size);
 const hasHiddenNodes = computed(() => hiddenNodeCount.value > 0);
 
+const selectedWordLemma = computed(() => {
+  if (!selectedNode.value || selectedNode.value.type !== "Word") return null;
+  const lemma = selectedNode.value.properties.lemma;
+  return typeof lemma === "string" && lemma ? lemma : null;
+});
+
+const selectedWordIsUnfamiliar = computed(() => {
+  if (!selectedNode.value || selectedNode.value.type !== "Word") return false;
+  return selectedNode.value.properties.unfamiliar === true;
+});
+
 let network: Network | null = null;
-const nodes = new DataSet<{ id: string; label: string; color?: string; shape?: string; title?: string }>();
-const edges = new DataSet<{ id: string; from: string; to: string; label?: string; arrows?: string }>();
+type VisNode = {
+  id: string;
+  label: string;
+  color?: string | { background?: string; border?: string; highlight?: { background?: string; border?: string } };
+  shape?: string;
+  title?: string;
+  borderWidth?: number;
+  hidden?: boolean;
+};
+const nodes = new DataSet<VisNode>();
+const edges = new DataSet<{
+  id: string;
+  from: string;
+  to: string;
+  label?: string;
+  arrows?: string;
+  hidden?: boolean;
+  color?: { color: string };
+  width?: number;
+  opacity?: number;
+}>();
 
 // Get edges connected to selected node
 function getNodeEdges(nodeId: string): GraphEdge[] {
@@ -101,19 +137,7 @@ async function expandNodeNeighborhood() {
       const existingNode = nodes.get(node.id);
       if (!existingNode) {
         // New node - add it
-        const tooltip = Object.entries(node.properties)
-          .map(([k, v]) => `${k}: ${v}`)
-          .join("\n");
-        
-        const style = getNodeStyle(node);
-        
-        nodes.add({
-          id: node.id,
-          label: node.label,
-          color: style.color,
-          shape: style.shape,
-          title: tooltip,
-        });
+        nodes.add(buildVisNode(node));
         
         // Add to currentGraphData
         currentGraphData.value.nodes.push(node);
@@ -162,12 +186,10 @@ async function expandNodeNeighborhood() {
       const updatedNodes = allNodes.map(node => {
         const isInNeighborhood = neighborhood.has(node.id);
         const graphNode = currentGraphData.value.nodes.find(n => n.id === node.id);
-        const style = graphNode ? getNodeStyle(graphNode) : { color: "#95a5a6" };
+        const base = graphNode ? buildVisNode(graphNode) : node;
         
         return {
-          ...node,
-          color: style.color,
-          shape: style.shape,
+          ...base,
           // Subtle fade for non-neighborhood nodes
           opacity: isInNeighborhood ? 1 : 0.6,
         };
@@ -201,19 +223,133 @@ async function expandNodeNeighborhood() {
   }
 }
 
-function buildVisNode(node: GraphNode) {
+function isUnfamiliarWord(node: GraphNode): boolean {
+  return node.type === "Word" && node.properties.unfamiliar === true;
+}
+
+function wordPassesUnfamiliarFilter(node: GraphNode): boolean {
+  if (!showUnfamiliarOnly.value) return true;
+  if (node.type !== "Word") return true;
+  return isUnfamiliarWord(node);
+}
+
+function buildVisNode(node: GraphNode): VisNode {
   const tooltip = Object.entries(node.properties)
     .map(([k, v]) => `${k}: ${v}`)
     .join("\n");
   const style = getNodeStyle(node);
+  const hidden =
+    hiddenNodeIds.value.has(node.id) || !wordPassesUnfamiliarFilter(node);
 
   return {
     id: node.id,
-    label: node.label,
+    label: style.label,
     color: style.color,
     shape: style.shape,
     title: tooltip,
+    borderWidth: style.borderWidth,
+    hidden,
   };
+}
+
+function syncGraphNodeInMemory(updated: GraphNode) {
+  const idx = currentGraphData.value.nodes.findIndex(n => n.id === updated.id);
+  if (idx >= 0) {
+    currentGraphData.value.nodes[idx] = updated;
+  }
+  if (nodes.get(updated.id)) {
+    nodes.update(buildVisNode(updated));
+  }
+  if (selectedNode.value?.id === updated.id) {
+    selectedNode.value = updated;
+    unfamiliarNoteDraft.value =
+      typeof updated.properties.unfamiliar_note === "string"
+        ? updated.properties.unfamiliar_note
+        : "";
+  }
+}
+
+function applyUnfamiliarFilterToCanvas() {
+  for (const graphNode of currentGraphData.value.nodes) {
+    if (!nodes.get(graphNode.id)) continue;
+    nodes.update({
+      id: graphNode.id,
+      hidden:
+        hiddenNodeIds.value.has(graphNode.id) ||
+        !wordPassesUnfamiliarFilter(graphNode),
+    });
+  }
+
+  const visibleIds = new Set(
+    currentGraphData.value.nodes
+      .filter(n => isNodeVisibleOnCanvas(n.id) && wordPassesUnfamiliarFilter(n))
+      .map(n => n.id)
+  );
+
+  for (const edge of currentGraphData.value.edges) {
+    const visEdge = edges.get(edge.id);
+    if (!visEdge) continue;
+    const show =
+      visibleIds.has(edge.source) && visibleIds.has(edge.target);
+    edges.update({ id: edge.id, hidden: !show });
+  }
+}
+
+async function setWordUnfamiliar(unfamiliar: boolean) {
+  if (!selectedWordLemma.value || !selectedNode.value) return;
+
+  unfamiliarWriteLoading.value = true;
+  unfamiliarWriteError.value = null;
+
+  try {
+    const payload: { unfamiliar: boolean; unfamiliar_note?: string } = {
+      unfamiliar,
+    };
+    if (unfamiliar && unfamiliarNoteDraft.value.trim()) {
+      payload.unfamiliar_note = unfamiliarNoteDraft.value.trim();
+    }
+
+    let res = await patchWordUnfamiliar(selectedWordLemma.value, payload);
+
+    if (res.status === 401) {
+      res = await patchWordUnfamiliar(selectedWordLemma.value, payload);
+    }
+
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({})) as { error?: string; message?: string };
+      throw new Error(errBody.message || errBody.error || `HTTP ${res.status}`);
+    }
+
+    const data = (await res.json()) as {
+      word?: { unfamiliar_note?: string };
+    };
+
+    const nextProps = { ...selectedNode.value.properties };
+    if (unfamiliar) {
+      nextProps.unfamiliar = true;
+      if (data.word?.unfamiliar_note) {
+        nextProps.unfamiliar_note = data.word.unfamiliar_note;
+      } else if (payload.unfamiliar_note) {
+        nextProps.unfamiliar_note = payload.unfamiliar_note;
+      } else {
+        delete nextProps.unfamiliar_note;
+      }
+    } else {
+      delete nextProps.unfamiliar;
+      delete nextProps.unfamiliar_note;
+      unfamiliarNoteDraft.value = "";
+    }
+
+    syncGraphNodeInMemory({
+      ...selectedNode.value,
+      properties: nextProps,
+    });
+    applyUnfamiliarFilterToCanvas();
+  } catch (err) {
+    unfamiliarWriteError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    unfamiliarWriteLoading.value = false;
+  }
 }
 
 function buildVisEdge(edge: GraphEdge) {
@@ -315,12 +451,10 @@ function cancelNeighborhoodHighlight() {
   const allNodes = nodes.get();
   const restoredNodes = allNodes.map(node => {
     const graphNode = currentGraphData.value.nodes.find(n => n.id === node.id);
-    const style = graphNode ? getNodeStyle(graphNode) : { color: "#95a5a6" };
+    const base = graphNode ? buildVisNode(graphNode) : node;
     
     return {
-      ...node,
-      color: style.color,
-      shape: style.shape,
+      ...base,
       opacity: 1,
     };
   });
@@ -344,7 +478,6 @@ function cancelNeighborhoodHighlight() {
 const nodeColors: Record<string, string> = {
   Root: "#ff6b6b",
   RootAffix: "#ff9f40",  // Orange for affix roots
-  Unit: "#4ecdc4",
   Word: "#45b7d1",
   Form: "#96ceb4",
   Insight: "#ffeaa7",
@@ -352,18 +485,37 @@ const nodeColors: Record<string, string> = {
 };
 
 // Helper to determine node color and shape
-function getNodeStyle(node: GraphNode): { color: string; shape?: string } {
+function getNodeStyle(node: GraphNode): {
+  color: string | { background: string; border: string };
+  shape?: string;
+  borderWidth?: number;
+  label: string;
+} {
   // Check if this is an affix root (Root with role = prefix or suffix)
   const isAffix = node.type === "Root" && (
     node.properties.role === "prefix" || node.properties.role === "suffix" ||
     node.isAffix
   );
-  
-  if (isAffix) {
-    return { color: nodeColors.RootAffix, shape: "diamond" };
+
+  let label = node.label;
+  if (isUnfamiliarWord(node)) {
+    label = `★ ${label}`;
   }
   
-  return { color: nodeColors[node.type] || "#95a5a6" };
+  if (isAffix) {
+    return { color: nodeColors.RootAffix, shape: "diamond", label };
+  }
+
+  const base = nodeColors[node.type] || "#95a5a6";
+  if (isUnfamiliarWord(node)) {
+    return {
+      color: { background: base, border: "#e67e22" },
+      borderWidth: 4,
+      label,
+    };
+  }
+  
+  return { color: base, label };
 }
 
 // Load graph data
@@ -379,6 +531,8 @@ async function loadGraphData() {
   neighborhoodMode.value = false;
   highlightedNodeId.value = null;
   hiddenNodeIds.value = new Set();
+  showUnfamiliarOnly.value = false;
+  unfamiliarWriteError.value = null;
 
   try {
     let url: string;
@@ -386,7 +540,7 @@ async function loadGraphData() {
     if (props.nodeId) {
       url = `/api/graph/node/${encodeURIComponent(props.nodeId)}`;
     } else if (props.unitId) {
-      url = `/api/graph/unit/${encodeURIComponent(props.unitId)}`;
+      url = `/api/graph/course-root/${encodeURIComponent(props.unitId)}`;
     } else {
       return; // Should never reach here due to early return above
     }
@@ -408,19 +562,7 @@ async function loadGraphData() {
 
     // Add nodes
     for (const node of data.nodes) {
-      const tooltip = Object.entries(node.properties)
-        .map(([k, v]) => `${k}: ${v}`)
-        .join("\n");
-      
-      const style = getNodeStyle(node);
-      
-      nodes.add({
-        id: node.id,
-        label: node.label,
-        color: style.color,
-        shape: style.shape,
-        title: tooltip,
-      });
+      nodes.add(buildVisNode(node));
     }
 
     // Add edges
@@ -510,6 +652,11 @@ onMounted(() => {
       const graphNode = currentGraphData.value.nodes.find((n: GraphNode) => n.id === nodeIdStr);
       if (graphNode) {
         selectedNode.value = graphNode;
+        unfamiliarWriteError.value = null;
+        unfamiliarNoteDraft.value =
+          typeof graphNode.properties.unfamiliar_note === "string"
+            ? graphNode.properties.unfamiliar_note
+            : "";
       }
     }
   });
@@ -537,6 +684,10 @@ watch(() => props.nodeId, (newNodeId, oldNodeId) => {
   }
 });
 
+watch(showUnfamiliarOnly, () => {
+  applyUnfamiliarFilterToCanvas();
+});
+
 // Expose method to load by unit
 defineExpose({
   loadUnit: () => {
@@ -559,7 +710,7 @@ defineExpose({
           已加载 {{ nodes.length }} 个节点
           <span v-if="hasHiddenNodes" class="status-hidden">（已隐藏 {{ hiddenNodeCount }}）</span>
         </span>
-        <span v-else class="status-hint">请选择单元</span>
+        <span v-else class="status-hint">请选择词根</span>
         <button
           v-if="hasHiddenNodes && !loading"
           type="button"
@@ -568,6 +719,10 @@ defineExpose({
         >
           显示已隐藏
         </button>
+        <label v-if="nodes.length > 0 && !loading" class="filter-unfamiliar">
+          <input v-model="showUnfamiliarOnly" type="checkbox" />
+          仅陌生词
+        </label>
       </div>
     </div>
 
@@ -595,6 +750,42 @@ defineExpose({
         </div>
       </div>
       
+      <div v-if="selectedWordLemma" class="unfamiliar-section">
+        <div class="unfamiliar-header">
+          <strong>陌生词标记</strong>
+          <span v-if="selectedWordIsUnfamiliar" class="unfamiliar-badge">已标记</span>
+        </div>
+        <label v-if="!selectedWordIsUnfamiliar" class="unfamiliar-note-label">
+          备注（可选）
+          <input
+            v-model="unfamiliarNoteDraft"
+            type="text"
+            maxlength="200"
+            placeholder='例如：因为 -ion'
+            :disabled="unfamiliarWriteLoading"
+          />
+        </label>
+        <p v-if="unfamiliarWriteError" class="unfamiliar-error">{{ unfamiliarWriteError }}</p>
+        <button
+          v-if="!selectedWordIsUnfamiliar"
+          type="button"
+          class="btn-mark-unfamiliar"
+          :disabled="loading || unfamiliarWriteLoading"
+          @click="setWordUnfamiliar(true)"
+        >
+          {{ unfamiliarWriteLoading ? "保存中…" : "标记为陌生词" }}
+        </button>
+        <button
+          v-else
+          type="button"
+          class="btn-unmark-unfamiliar"
+          :disabled="loading || unfamiliarWriteLoading"
+          @click="setWordUnfamiliar(false)"
+        >
+          {{ unfamiliarWriteLoading ? "保存中…" : "取消陌生词" }}
+        </button>
+      </div>
+
       <div class="node-actions">
         <button
           type="button"
@@ -638,12 +829,12 @@ defineExpose({
         <span class="legend-label">后缀 Suffix</span>
       </div>
       <div class="legend-item">
-        <span class="legend-dot" style="background: #4ecdc4"></span>
-        <span class="legend-label">单元 Unit</span>
+        <span class="legend-dot legend-dot-unfamiliar" style="background: #45b7d1"></span>
+        <span class="legend-label">单词 Word（★ 陌生）</span>
       </div>
       <div class="legend-item">
-        <span class="legend-dot" style="background: #45b7d1"></span>
-        <span class="legend-label">单词 Word</span>
+        <span class="legend-dot" style="background: #9b59b6"></span>
+        <span class="legend-label">例句 Example</span>
       </div>
       <div class="legend-item">
         <span class="legend-dot" style="background: #96ceb4"></span>
@@ -725,6 +916,20 @@ defineExpose({
 
 .status-hint {
   color: #7f8c8d;
+}
+
+.filter-unfamiliar {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: #34495e;
+  cursor: pointer;
+  user-select: none;
+}
+
+.filter-unfamiliar input {
+  cursor: pointer;
 }
 
 .graph-container {
@@ -823,6 +1028,90 @@ defineExpose({
 .edge-kind {
   color: #7f8c8d;
   font-size: 0.8rem;
+}
+
+.unfamiliar-section {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #eee;
+}
+
+.unfamiliar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+  font-size: 0.875rem;
+  color: #34495e;
+}
+
+.unfamiliar-badge {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #d35400;
+  background: #fdebd0;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+}
+
+.unfamiliar-note-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  color: #7f8c8d;
+  margin-bottom: 0.5rem;
+}
+
+.unfamiliar-note-label input {
+  padding: 0.45rem 0.6rem;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-family: inherit;
+}
+
+.unfamiliar-error {
+  margin: 0 0 0.5rem;
+  font-size: 0.8rem;
+  color: #e74c3c;
+}
+
+.btn-mark-unfamiliar,
+.btn-unmark-unfamiliar {
+  width: 100%;
+  padding: 0.625rem 1rem;
+  min-height: 44px;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btn-mark-unfamiliar {
+  background: #9b59b6;
+  color: white;
+}
+
+.btn-mark-unfamiliar:hover:not(:disabled) {
+  background: #8e44ad;
+}
+
+.btn-unmark-unfamiliar {
+  background: #ecf0f1;
+  color: #2c3e50;
+}
+
+.btn-unmark-unfamiliar:hover:not(:disabled) {
+  background: #dde4e6;
+}
+
+.btn-mark-unfamiliar:disabled,
+.btn-unmark-unfamiliar:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
 }
 
 .node-actions {
@@ -935,6 +1224,10 @@ defineExpose({
   border-radius: 50%;
   display: inline-block;
   flex-shrink: 0;
+}
+
+.legend-dot-unfamiliar {
+  box-shadow: 0 0 0 2px #e67e22;
 }
 
 .legend-diamond {
