@@ -71,15 +71,17 @@ If the public URL is plain HTTP, the password is sent in cleartext. Prefer HTTPS
 
 Public hosts (tunnel owned by another team; **not** configured in this repo):
 
-- `https://word-decom-test.vm.splinter.fun` → host `:3000`
-- `https://word-decom-dev.vm.splinter.fun` → host `:3000`
-- Leave `vm.splinter.fun` → `:8080` untouched
+- `https://word-decom-test.splinter.fun` → host `:3000`
+- `https://word-decom-dev.splinter.fun` → host `:3000`
+- Legacy `*.vm.splinter.fun` hostnames may still forward to `:3000`
 
-Vite `allowedHosts` includes `*.vm.splinter.fun` so those hostnames work once the tunnel exists.
+Vite `server` / `preview` `allowedHosts` includes `.splinter.fun` and `.vm.splinter.fun`.
 
 ## Deploy host: start / stop / status
 
 Native processes (no Docker). Pid + logs under `logs/<env>/`.
+
+`start.sh` / `restart.sh` build if `apps/web/dist` or `apps/api/dist` is missing (or when `BUILD=1`), then serve **production** artifacts: `node apps/api/dist` + `vite preview` on `:3000` (with `/api` proxy). This is not `vite` dev or `tsx watch`. Local hot-reload: `pnpm dev` / `pnpm dev:web` / `pnpm dev:api`.
 
 ```bash
 ./scripts/start.sh test    # or: ./scripts/start.sh dev
@@ -129,20 +131,35 @@ pnpm start:api    # run compiled API only
 ### Features
 
 **Layout:**
-- Left sidebar: Unit selector + search
+- Left sidebar: Course unit selector (main Roots with `unit_order`) + search
 - Middle panel: Chat interface (stub replies for now)
 - Right panel: Force-directed etymology graph viewer
 
 **Graph Viewer:**
-- Displays Units, Roots, Words, Forms, and Insights
+- Displays Roots, Words, Forms, Examples, and Insights
 - Color-coded by node type
-- Shows relationships: DERIVES_FROM, IN_UNIT, SYNONYM_OF, CONFUSABLE_WITH, MISSPELLING_OF, ABOUT
+- Shows relationships: DERIVES_FROM, SYNONYM_OF, CONFUSABLE_WITH, MISSPELLING_OF, ABOUT, ILLUSTRATES
 - Click nodes to see details and relationships
 - Interactive physics simulation
 
+**Course roots (Neo4j, read-only):** sidebar **单元/课** lists `:Root` nodes only (`source = etymology-roots`; no `Unit` / `IN_UNIT` Cypher). Non-affix roots: `unit_order` 1–9 first, then roots with null `unit_order`, ordered by `form` / `id`. Affix roots use the 词缀 tab. Numbered `Root.form` values:
+
+| `unit_order` | `Root.form` (label in sidebar) |
+|---:|---|
+| 1 | chron-/chrono- |
+| 2 | arch-/archi-/-archy |
+| 3 | struct- |
+| 4 | graph-/gram- |
+| 5 | log- |
+| 6 | path-/pat- |
+| 7 | pel/puls |
+| 8 | pon/pound |
+| 9 | vis/vid |
+
 **API Endpoints:**
-- `GET /api/graph/units` - List all units
-- `GET /api/graph/unit/:unitId` - Get unit subgraph
+- `GET /api/graph/course-roots` - List non-affix Roots (numbered first, then unnumbered; sidebar 单元/课)
+- `GET /api/graph/course-root/:rootId` - Subgraph for one course Root (2-hop neighborhood)
+- `GET /api/graph/units` and `GET /api/graph/unit/:unitId` - **410 Gone** (Unit nodes removed; use course-root endpoints)
 - `GET /api/graph/node/:nodeId` - Get node neighborhood
 - `GET /api/graph/search?q=term` - Search words/roots
 - `GET /api/graph/unfamiliar-words` - List Words marked unfamiliar
@@ -159,13 +176,14 @@ pnpm start:api    # run compiled API only
    - Navigate to `http://127.0.0.1:3000`
    - You should see the word-decompose interface with three panels
 
-3. **Test Unit Selection:**
-   - In the left sidebar, you should see a list of units (if Neo4j is configured and has data)
-   - Click on a unit to load its subgraph in the graph viewer
+3. **Test unit (课) selection:**
+   - In the left sidebar, numbered roots 1–9 appear first (forms in table above), then unnumbered roots
+   - Click a row to load that Root’s neighborhood in the graph viewer
+   - Optional API smoke check (read-only): `./scripts/verify-course-roots.sh` with API running
 
 4. **Test Graph Interaction:**
    - The right panel shows the force-directed graph
-   - Nodes are color-coded (Roots: red, Units: teal, Words: blue, Forms: green, Insights: yellow)
+   - Nodes are color-coded (Roots: red, affix roots: orange diamond, Words: blue, Forms: green, Examples: purple)
    - Click on any node to see its details in the overlay panel
    - The graph should show relationships between nodes
 

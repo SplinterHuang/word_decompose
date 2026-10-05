@@ -26,6 +26,7 @@ interface GraphData {
 }
 
 const props = defineProps<{
+  /** Main Root id (course / 单元) with unit_order */
   unitId?: string;
   nodeId?: string;
 }>();
@@ -477,7 +478,6 @@ function cancelNeighborhoodHighlight() {
 const nodeColors: Record<string, string> = {
   Root: "#ff6b6b",
   RootAffix: "#ff9f40",  // Orange for affix roots
-  Unit: "#4ecdc4",
   Word: "#45b7d1",
   Form: "#96ceb4",
   Insight: "#ffeaa7",
@@ -540,7 +540,7 @@ async function loadGraphData() {
     if (props.nodeId) {
       url = `/api/graph/node/${encodeURIComponent(props.nodeId)}`;
     } else if (props.unitId) {
-      url = `/api/graph/unit/${encodeURIComponent(props.unitId)}`;
+      url = `/api/graph/course-root/${encodeURIComponent(props.unitId)}`;
     } else {
       return; // Should never reach here due to early return above
     }
@@ -710,7 +710,7 @@ defineExpose({
           已加载 {{ nodes.length }} 个节点
           <span v-if="hasHiddenNodes" class="status-hidden">（已隐藏 {{ hiddenNodeCount }}）</span>
         </span>
-        <span v-else class="status-hint">请选择单元</span>
+        <span v-else class="status-hint">请选择词根</span>
         <button
           v-if="hasHiddenNodes && !loading"
           type="button"
@@ -829,12 +829,12 @@ defineExpose({
         <span class="legend-label">后缀 Suffix</span>
       </div>
       <div class="legend-item">
-        <span class="legend-dot" style="background: #4ecdc4"></span>
-        <span class="legend-label">单元 Unit</span>
-      </div>
-      <div class="legend-item">
         <span class="legend-dot legend-dot-unfamiliar" style="background: #45b7d1"></span>
         <span class="legend-label">单词 Word（★ 陌生）</span>
+      </div>
+      <div class="legend-item">
+        <span class="legend-dot" style="background: #9b59b6"></span>
+        <span class="legend-label">例句 Example</span>
       </div>
       <div class="legend-item">
         <span class="legend-dot" style="background: #96ceb4"></span>

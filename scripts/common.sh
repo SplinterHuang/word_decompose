@@ -102,6 +102,25 @@ ensure_pnpm() {
   fi
 }
 
+# Build web dist + compiled API when outputs are missing or BUILD=1 (no dev/watch).
+ensure_prod_build() {
+  local api_dist="${ROOT_DIR}/apps/api/dist/index.js"
+  local web_dist="${ROOT_DIR}/apps/web/dist/index.html"
+  local force="${BUILD:-0}"
+
+  if [[ "$force" == "1" ]] || [[ ! -f "$api_dist" ]] || [[ ! -f "$web_dist" ]]; then
+    echo "building production artifacts (web dist + api dist)..."
+    (cd "$ROOT_DIR" && pnpm build)
+  else
+    echo "using existing production build (set BUILD=1 to rebuild)"
+  fi
+
+  if [[ ! -f "$api_dist" ]] || [[ ! -f "$web_dist" ]]; then
+    echo "error: build did not produce expected dist outputs" >&2
+    exit 1
+  fi
+}
+
 # Kill a tracked process and its descendants.
 kill_tree() {
   local pid="$1"

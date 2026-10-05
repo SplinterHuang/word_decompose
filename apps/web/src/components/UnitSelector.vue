@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 
-interface Unit {
+/** Sidebar course list entry — non-affix Root (unit_order optional). */
+interface CourseRoot {
   id: string;
-  order: number;
+  unit_order?: number | null;
   title: string;
+  form?: string;
+  gloss_zh?: string;
 }
 
 interface Affix {
@@ -34,7 +37,7 @@ const emit = defineEmits<{
   nodeSelected: [nodeId: string];
 }>();
 
-const units = ref<Unit[]>([]);
+const units = ref<CourseRoot[]>([]);
 const affixes = ref<Affix[]>([]);
 const examples = ref<Example[]>([]);
 const unfamiliarWords = ref<UnfamiliarWord[]>([]);
@@ -51,19 +54,15 @@ async function loadUnits() {
   error.value = null;
 
   try {
-    const res = await fetch("/api/graph/units");
+    // Root list only (never /api/graph/units or Unit nodes in Neo4j)
+    const res = await fetch("/api/graph/course-roots");
     if (!res.ok) {
       const errorData = await res.json().catch(() => ({ error: "Unknown error" }));
       throw new Error(errorData.error || `HTTP ${res.status}`);
     }
 
     const data = await res.json();
-    units.value = data.units || [];
-
-    // Auto-select first unit if available
-    if (units.value.length > 0 && !selectedUnitId.value) {
-      selectUnit(units.value[0].id);
-    }
+    units.value = data.courseRoots || [];
   } catch (err) {
     console.error("[UnitSelector] Error loading units:", err);
     error.value = err instanceof Error ? err.message : String(err);
@@ -85,11 +84,6 @@ async function loadAffixes() {
 
     const data = await res.json();
     affixes.value = data.affixes || [];
-
-    // Auto-select first affix if available
-    if (affixes.value.length > 0 && !selectedAffixId.value) {
-      selectAffix(affixes.value[0].id);
-    }
   } catch (err) {
     console.error("[UnitSelector] Error loading affixes:", err);
     error.value = err instanceof Error ? err.message : String(err);
@@ -134,10 +128,6 @@ async function loadExamples() {
 
     const data = await res.json();
     examples.value = data.examples || [];
-
-    if (examples.value.length > 0 && !selectedExampleId.value) {
-      selectExample(examples.value[0].id);
-    }
   } catch (err) {
     console.error("[UnitSelector] Error loading examples:", err);
     error.value = err instanceof Error ? err.message : String(err);
@@ -186,29 +176,18 @@ function reloadCurrentMode() {
 }
 
 function switchMode(mode: "units" | "affixes" | "examples" | "unfamiliar") {
+  if (browseMode.value === mode) return;
   browseMode.value = mode;
-  clearSelection();
-  
-  if (mode === "units") {
-    if (units.value.length === 0) {
-      loadUnits();
-    } else if (units.value.length > 0) {
-      selectUnit(units.value[0].id);
-    }
-  } else if (mode === "affixes") {
-    if (affixes.value.length === 0) {
-      loadAffixes();
-    } else if (affixes.value.length > 0) {
-      selectAffix(affixes.value[0].id);
-    }
-  } else if (mode === "unfamiliar") {
-    if (unfamiliarWords.value.length === 0) {
-      loadUnfamiliarWords();
-    }
-  } else if (examples.value.length === 0) {
+
+  // Lazy-load list only; do not emit selection (keeps mobile drawer open).
+  if (mode === "units" && units.value.length === 0) {
+    loadUnits();
+  } else if (mode === "affixes" && affixes.value.length === 0) {
+    loadAffixes();
+  } else if (mode === "examples" && examples.value.length === 0) {
     loadExamples();
-  } else if (examples.value.length > 0) {
-    selectExample(examples.value[0].id);
+  } else if (mode === "unfamiliar" && unfamiliarWords.value.length === 0) {
+    loadUnfamiliarWords();
   }
 }
 
@@ -257,8 +236,11 @@ function exampleKindLabel(kind: string): string {
   return "例";
 }
 
-onMounted(() => {
-  loadUnits();
+onMounted(async () => {
+  await loadUnits();
+  if (units.value.length > 0) {
+    selectUnit(units.value[0].id);
+  }
 });
 </script>
 
@@ -274,7 +256,7 @@ onMounted(() => {
         :class="['mode-btn', { active: browseMode === 'units' }]"
         @click="switchMode('units')"
       >
-        单元
+        词根
       </button>
       <button 
         :class="['mode-btn', { active: browseMode === 'affixes' }]"
@@ -310,7 +292,7 @@ onMounted(() => {
 
     <div v-if="loading" class="status-message">加载中...</div>
     <div v-else-if="error" class="status-message error">{{ error }}</div>
-    <div v-else-if="browseMode === 'units' && units.length === 0" class="status-message">暂无单元</div>
+    <div v-else-if="browseMode === 'units' && units.length === 0" class="status-message">暂无词根</div>
     <div v-else-if="browseMode === 'affixes' && affixes.length === 0" class="status-message">暂无词缀</div>
     <div v-else-if="browseMode === 'examples' && examples.length === 0" class="status-message">暂无例句</div>
     <div v-else-if="browseMode === 'unfamiliar' && unfamiliarWords.length === 0" class="status-message">暂无陌生词</div>
@@ -322,8 +304,14 @@ onMounted(() => {
         :class="['unit-item', { active: selectedUnitId === unit.id }]"
         @click="selectUnit(unit.id)"
       >
-        <span class="unit-order">{{ typeof unit.order === 'number' ? unit.order : '?' }}</span>
-        <span class="unit-title">{{ unit.title }}</span>
+        <span class="unit-order">{{ typeof unit.unit_order === 'number' ? unit.unit_order : '?' }}</span>
+        <div class="unit-text">
+          <span class="unit-title">{{ unit.title }}</span>
+          <span
+            v-if="unit.gloss_zh && unit.gloss_zh !== unit.title"
+            class="unit-gloss"
+          >{{ unit.gloss_zh }}</span>
+        </div>
       </button>
     </div>
 
@@ -537,10 +525,24 @@ onMounted(() => {
   background: #45b8af;
 }
 
-.unit-title {
+.unit-text {
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.unit-title {
   color: #2c3e50;
   font-size: 0.95rem;
+  line-height: 1.3;
+}
+
+.unit-gloss {
+  color: #7f8c8d;
+  font-size: 0.8rem;
+  line-height: 1.25;
 }
 
 .affixes-list {

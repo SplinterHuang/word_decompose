@@ -28,6 +28,12 @@ export default defineConfig(({ mode }) => {
       port: webPort,
       strictPort: true,
       allowedHosts: [".splinter.fun", ".vm.splinter.fun", ".trycloudflare.com", "localhost", "127.0.0.1"],
+      proxy: {
+        "/api": {
+          target: `http://${apiHost}:${apiPort}`,
+          changeOrigin: true,
+        },
+      },
     },
   };
 });
