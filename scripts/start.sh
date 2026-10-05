@@ -38,6 +38,7 @@ rm -f "$API_PID_FILE" "$WEB_PID_FILE"
 export HOST="$API_HOST"
 export PORT="$API_PORT"
 export API_HOST API_PORT WEB_HOST WEB_PORT NODE_ENV APP_ENV
+# Optional: GRAPH_WRITE_PASSWORD for Word unfamiliar writes (set in .env; never commit)
 
 # setsid: new session so stop can tear down the process tree reliably
 (

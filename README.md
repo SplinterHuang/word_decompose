@@ -23,22 +23,44 @@ cp .env.example .env
 # Edit .env to set NEO4J_PASSWORD
 ```
 
-### Neo4j Configuration (Read-Only)
+### Neo4j configuration
 
 The application connects to a Neo4j database for etymology graph data. Configure the following environment variables in `.env`:
 
 ```bash
 NEO4J_URI=bolt://127.0.0.1:7687
 NEO4J_USER=neo4j
-NEO4J_PASSWORD=your_password_here
+NEO4J_PASSWORD=
 NEO4J_DATABASE=neo4j
 ```
 
 **Important:**
-- The application is **read-only** and will never write to Neo4j
-- All queries filter by `source: "etymology-roots"` 
-- If Neo4j is not configured or unavailable, the API will soft-fail with clear error messages
-- Graph endpoints will return 503 when Neo4j is unavailable
+- Read paths use Neo4j read queries only; the only intentional write is marking **Word** nodes with `unfamiliar` / `unfamiliar_note` (see below).
+- All queries filter by `source: "etymology-roots"`.
+- If Neo4j is not configured or unavailable, the API will soft-fail with clear error messages.
+- Graph read endpoints return 503 when Neo4j is unavailable.
+
+### Marking unfamiliar words (narrow write path)
+
+Deploy hosts set a single shared write password in the environment (not in git):
+
+```bash
+GRAPH_WRITE_PASSWORD=
+```
+
+`scripts/start.sh` loads `.env` via `load_dotenv` in `scripts/common.sh`, so the API process receives `GRAPH_WRITE_PASSWORD` when you set it in `.env` on the box.
+
+| Item | Value |
+| --- | --- |
+| Env var | `GRAPH_WRITE_PASSWORD` |
+| Request header | `X-Write-Password` (same value as the env var) |
+| Mark | `PATCH /api/graph/word/:lemma/unfamiliar` with JSON `{ "unfamiliar": true, "unfamiliar_note": "optional short note" }` |
+| Unmark | Same URL with `{ "unfamiliar": false }` (removes `unfamiliar` and `unfamiliar_note`) |
+| List (read) | `GET /api/graph/unfamiliar-words` |
+
+The UI prompts once for the password on the first write, stores it in **browser localStorage**, and sends it on each write. The API returns **401** if the header is missing or wrong; the UI clears storage and asks again.
+
+If the public URL is plain HTTP, the password is sent in cleartext. Prefer HTTPS, e.g. `https://word-decom-dev.splinter.fun` (tunnel to host `:3000`).
 
 ## Ports
 
@@ -123,6 +145,8 @@ pnpm start:api    # run compiled API only
 - `GET /api/graph/unit/:unitId` - Get unit subgraph
 - `GET /api/graph/node/:nodeId` - Get node neighborhood
 - `GET /api/graph/search?q=term` - Search words/roots
+- `GET /api/graph/unfamiliar-words` - List Words marked unfamiliar
+- `PATCH /api/graph/word/:lemma/unfamiliar` - Mark/unmark unfamiliar (requires `X-Write-Password`)
 
 ### 验收 (Acceptance Testing)
 

@@ -1,8 +1,12 @@
 import { Router, Request, Response } from "express";
 import { getSession, isAvailable, getConnectionError, GraphData, GraphNode, GraphEdge } from "./neo4j.js";
 import { Record as Neo4jRecord, Integer, isInt } from "neo4j-driver";
+import { requireGraphWritePassword } from "./write-auth.js";
 
 const router = Router();
+
+const SOURCE = "etymology-roots";
+const MAX_UNFAMILIAR_NOTE_LENGTH = 200;
 
 // Helper to handle unavailable Neo4j
 function requireNeo4j(res: Response): boolean {
@@ -110,7 +114,7 @@ router.get("/units", async (_req: Request, res: Response) => {
        WHERE u.source = $source OR $source IN labels(u)
        RETURN u
        ORDER BY u.order`,
-      { source: "etymology-roots" }
+      { source: SOURCE }
     );
 
     const units = result.records.map(record => {
@@ -411,5 +415,152 @@ router.get("/search", async (req: Request, res: Response) => {
     await session.close();
   }
 });
+
+// List Word nodes marked unfamiliar (read-only)
+router.get("/unfamiliar-words", async (_req: Request, res: Response) => {
+  if (!requireNeo4j(res)) return;
+
+  const session = getSession();
+  if (!session) {
+    res.status(503).json({ error: "Failed to create session" });
+    return;
+  }
+
+  try {
+    const result = await session.run(
+      `MATCH (w:Word)
+       WHERE (w.source = $source OR $source IN labels(w))
+         AND w.unfamiliar = true
+       RETURN w
+       ORDER BY w.lemma`,
+      { source: SOURCE }
+    );
+
+    const words = result.records.map(record => {
+      const node = toGraphNode(record, "w");
+      return {
+        lemma: node.properties.lemma,
+        unfamiliar_note:
+          typeof node.properties.unfamiliar_note === "string"
+            ? node.properties.unfamiliar_note
+            : undefined,
+        id: node.id,
+      };
+    });
+
+    res.json({ words });
+  } catch (err) {
+    console.error("[graph] Error listing unfamiliar words:", err);
+    res.status(500).json({ error: "Failed to list unfamiliar words", message: String(err) });
+  } finally {
+    await session.close();
+  }
+});
+
+// Mark or unmark a Word as unfamiliar (Word nodes only; narrow write path)
+router.patch(
+  "/word/:lemma/unfamiliar",
+  requireGraphWritePassword,
+  async (req: Request, res: Response) => {
+    if (!requireNeo4j(res)) return;
+
+    const { lemma } = req.params;
+    if (!lemma || typeof lemma !== "string") {
+      res.status(400).json({ error: "lemma required" });
+      return;
+    }
+
+    const body = req.body as { unfamiliar?: unknown; unfamiliar_note?: unknown };
+    if (typeof body.unfamiliar !== "boolean") {
+      res.status(400).json({ error: "Body field 'unfamiliar' (boolean) is required" });
+      return;
+    }
+
+    let note: string | null = null;
+    if (body.unfamiliar) {
+      if (body.unfamiliar_note !== undefined && body.unfamiliar_note !== null) {
+        if (typeof body.unfamiliar_note !== "string") {
+          res.status(400).json({ error: "unfamiliar_note must be a string" });
+          return;
+        }
+        const trimmed = body.unfamiliar_note.trim();
+        if (trimmed.length > MAX_UNFAMILIAR_NOTE_LENGTH) {
+          res.status(400).json({
+            error: `unfamiliar_note must be at most ${MAX_UNFAMILIAR_NOTE_LENGTH} characters`,
+          });
+          return;
+        }
+        note = trimmed.length > 0 ? trimmed : null;
+      }
+    }
+
+    const session = getSession();
+    if (!session) {
+      res.status(503).json({ error: "Failed to create session" });
+      return;
+    }
+
+    try {
+      if (body.unfamiliar) {
+        const result = await session.run(
+          `MATCH (w:Word {lemma: $lemma})
+           WHERE (w.source = $source OR $source IN labels(w))
+           SET w.unfamiliar = true
+           FOREACH (_ IN CASE WHEN $note IS NULL THEN [] ELSE [1] END |
+             SET w.unfamiliar_note = $note)
+           RETURN w`,
+          { lemma, source: SOURCE, note }
+        );
+
+        if (result.records.length === 0) {
+          res.status(404).json({ error: "Word not found", lemma });
+          return;
+        }
+
+        const node = toGraphNode(result.records[0], "w");
+        res.json({
+          ok: true,
+          word: {
+            lemma: node.properties.lemma,
+            unfamiliar: true,
+            unfamiliar_note:
+              typeof node.properties.unfamiliar_note === "string"
+                ? node.properties.unfamiliar_note
+                : undefined,
+            id: node.id,
+          },
+        });
+      } else {
+        const result = await session.run(
+          `MATCH (w:Word {lemma: $lemma})
+           WHERE (w.source = $source OR $source IN labels(w))
+           REMOVE w.unfamiliar, w.unfamiliar_note
+           RETURN w`,
+          { lemma, source: SOURCE }
+        );
+
+        if (result.records.length === 0) {
+          res.status(404).json({ error: "Word not found", lemma });
+          return;
+        }
+
+        const node = toGraphNode(result.records[0], "w");
+        res.json({
+          ok: true,
+          word: {
+            lemma: node.properties.lemma,
+            unfamiliar: false,
+            id: node.id,
+          },
+        });
+      }
+    } catch (err) {
+      console.error("[graph] Error updating unfamiliar flag:", err);
+      res.status(500).json({ error: "Failed to update word", message: String(err) });
+    } finally {
+      await session.close();
+    }
+  }
+);
 
 export default router;
