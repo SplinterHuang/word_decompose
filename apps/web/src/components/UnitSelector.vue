@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 
 /** Sidebar course list entry — non-affix Root (unit_order optional). */
 interface CourseRoot {
@@ -48,6 +48,49 @@ const loading = ref(false);
 const error = ref<string | null>(null);
 const searchQuery = ref("");
 const browseMode = ref<"units" | "affixes" | "examples" | "unfamiliar">("units");
+
+const activeSearchQuery = computed(() => searchQuery.value.trim().toLowerCase());
+
+function matchesLocalSearch(...fields: (string | number | null | undefined)[]): boolean {
+  const q = activeSearchQuery.value;
+  if (!q) return true;
+  return fields.some((field) => {
+    if (field === null || field === undefined) return false;
+    return String(field).toLowerCase().includes(q);
+  });
+}
+
+const filteredUnits = computed(() => {
+  const q = activeSearchQuery.value;
+  if (!q) return units.value;
+  return units.value.filter((unit) =>
+    matchesLocalSearch(unit.id, unit.title, unit.form, unit.gloss_zh, unit.unit_order)
+  );
+});
+
+const filteredAffixes = computed(() => {
+  const q = activeSearchQuery.value;
+  if (!q) return affixes.value;
+  return affixes.value.filter((affix) =>
+    matchesLocalSearch(affix.id, affix.form, affix.gloss_zh, affix.role)
+  );
+});
+
+const filteredExamples = computed(() => {
+  const q = activeSearchQuery.value;
+  if (!q) return examples.value;
+  return examples.value.filter((example) =>
+    matchesLocalSearch(example.id, example.title, example.word_lemma, example.kind)
+  );
+});
+
+const filteredUnfamiliarWords = computed(() => {
+  const q = activeSearchQuery.value;
+  if (!q) return unfamiliarWords.value;
+  return unfamiliarWords.value.filter((word) =>
+    matchesLocalSearch(word.id, word.lemma, word.unfamiliar_note)
+  );
+});
 
 async function loadUnits() {
   loading.value = true;
@@ -196,40 +239,6 @@ function selectUnfamiliarWord(word: UnfamiliarWord) {
   emit("nodeSelected", word.lemma);
 }
 
-async function searchGraph() {
-  if (!searchQuery.value.trim()) return;
-
-  try {
-    const res = await fetch(`/api/graph/search?q=${encodeURIComponent(searchQuery.value)}`);
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`);
-    }
-
-    const data = await res.json();
-    console.log("[UnitSelector] Search results:", data.nodes);
-    
-    // If we get results, allow selecting them
-    if (data.nodes && data.nodes.length > 0) {
-      // For MVP: if first result is an affix Root, emit affixSelected
-      // Otherwise emit nodeSelected to load its neighborhood
-      const firstNode = data.nodes[0];
-      if (firstNode.type === "Root" && firstNode.isAffix) {
-        selectAffix(firstNode.id);
-      } else if (firstNode.type === "Example") {
-        selectExample(firstNode.id);
-      } else if (firstNode.type === "Word" && firstNode.properties?.lemma) {
-        clearSelection();
-        emit("nodeSelected", String(firstNode.properties.lemma));
-      } else {
-        clearSelection();
-        emit("nodeSelected", firstNode.id);
-      }
-    }
-  } catch (err) {
-    console.error("[UnitSelector] Search error:", err);
-  }
-}
-
 function exampleKindLabel(kind: string): string {
   if (kind === "user_dialogue") return "对话";
   if (kind === "usage") return "用法";
@@ -281,13 +290,10 @@ onMounted(async () => {
     <div class="search-box">
       <input
         v-model="searchQuery"
-        type="text"
-        placeholder="搜索词根或单词..."
-        @keyup.enter="searchGraph"
+        type="search"
+        placeholder="筛选当前列表..."
+        aria-label="筛选当前列表"
       />
-      <button @click="searchGraph" :disabled="!searchQuery.trim()">
-        搜索
-      </button>
     </div>
 
     <div v-if="loading" class="status-message">加载中...</div>
@@ -296,10 +302,14 @@ onMounted(async () => {
     <div v-else-if="browseMode === 'affixes' && affixes.length === 0" class="status-message">暂无词缀</div>
     <div v-else-if="browseMode === 'examples' && examples.length === 0" class="status-message">暂无例句</div>
     <div v-else-if="browseMode === 'unfamiliar' && unfamiliarWords.length === 0" class="status-message">暂无陌生词</div>
+    <div v-else-if="activeSearchQuery && browseMode === 'units' && filteredUnits.length === 0" class="status-message">无匹配结果</div>
+    <div v-else-if="activeSearchQuery && browseMode === 'affixes' && filteredAffixes.length === 0" class="status-message">无匹配结果</div>
+    <div v-else-if="activeSearchQuery && browseMode === 'examples' && filteredExamples.length === 0" class="status-message">无匹配结果</div>
+    <div v-else-if="activeSearchQuery && browseMode === 'unfamiliar' && filteredUnfamiliarWords.length === 0" class="status-message">无匹配结果</div>
 
     <div v-else-if="browseMode === 'units'" class="units-list">
       <button
-        v-for="unit in units"
+        v-for="unit in filteredUnits"
         :key="unit.id"
         :class="['unit-item', { active: selectedUnitId === unit.id }]"
         @click="selectUnit(unit.id)"
@@ -317,7 +327,7 @@ onMounted(async () => {
 
     <div v-else-if="browseMode === 'affixes'" class="affixes-list">
       <button
-        v-for="affix in affixes"
+        v-for="affix in filteredAffixes"
         :key="affix.id"
         :class="['affix-item', { active: selectedAffixId === affix.id }]"
         @click="selectAffix(affix.id)"
@@ -332,7 +342,7 @@ onMounted(async () => {
 
     <div v-else-if="browseMode === 'unfamiliar'" class="unfamiliar-list">
       <button
-        v-for="word in unfamiliarWords"
+        v-for="word in filteredUnfamiliarWords"
         :key="word.lemma"
         type="button"
         class="unfamiliar-item"
@@ -348,7 +358,7 @@ onMounted(async () => {
 
     <div v-else class="examples-list">
       <button
-        v-for="example in examples"
+        v-for="example in filteredExamples"
         :key="example.id"
         :class="['example-item', { active: selectedExampleId === example.id }]"
         @click="selectExample(example.id)"
